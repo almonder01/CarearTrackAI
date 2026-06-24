@@ -1,0 +1,54 @@
+## Build results
+bin/
+obj/
+
+## Visual Studio
+.vs/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+## Rider / JetBrains
+.idea/
+
+## Publish output
+publish/
+
+## Dotnet tools
+.toolstarget/
+
+## Logs
+*.log
+
+## App settings (لو فيه بيانات حساسة)
+appsettings.Development.json
+appsettings.Production.json
+
+## OS files
+.DS_Store
+Thumbs.db
+
+## NuGet packages
+*.nupkg
+*.snupkg
+packages/
+*.nuget.props
+*.nuget.targets
+
+## ASP.NET Scaffolding
+ScaffoldingReadMe.txt
+
+## Entity Framework
+Migrations/*Snapshot.cs
+
+## Test results
+TestResults/
+*.trx
+
+## Coverage
+coverage/
+*.coverage
+
+## Secret files
+secrets.json
