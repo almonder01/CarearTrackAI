@@ -23,7 +23,6 @@ namespace CareerTrackAI.Data
             base.OnModelCreating(modelBuilder);
 
             // ==================== GLOBAL SOFT DELETE FILTERS ====================
-            // تسري على كل query تلقائياً - للوصول للمحذوفات: .IgnoreQueryFilters()
             modelBuilder.Entity<User>().HasQueryFilter(e => !e.IsDeleted);
             modelBuilder.Entity<Company>().HasQueryFilter(e => !e.IsDeleted);
             modelBuilder.Entity<JobOpportunity>().HasQueryFilter(e => !e.IsDeleted);
@@ -64,7 +63,6 @@ namespace CareerTrackAI.Data
                 entity.Property(c => c.Name).IsRequired().HasMaxLength(200);
                 entity.Property(c => c.Website).HasMaxLength(500);
                 entity.Property(c => c.Email).HasMaxLength(255);
-                // Index للبحث والفلتر الجغرافي
                 entity.HasIndex(c => c.Country);
                 entity.HasIndex(c => c.City);
                 entity.HasIndex(c => c.Industry);
@@ -76,6 +74,8 @@ namespace CareerTrackAI.Data
                 entity.Property(j => j.Title).IsRequired().HasMaxLength(200);
                 entity.Property(j => j.Type).HasConversion<string>();
                 entity.Property(j => j.EmploymentType).HasConversion<string>();
+                entity.Property(j => j.SalaryMin).HasPrecision(18, 2);
+                entity.Property(j => j.SalaryMax).HasPrecision(18, 2);
 
                 entity.HasIndex(j => j.Type);
                 entity.HasIndex(j => j.IsActive);
@@ -94,7 +94,6 @@ namespace CareerTrackAI.Data
                       .HasConversion<string>()
                       .HasDefaultValue(ApplicationStatus.Planning);
 
-                // Unique: مستخدم واحد لا يقدم على نفس الفرصة مرتين
                 entity.HasIndex(a => new { a.UserId, a.JobOpportunityId }).IsUnique();
                 entity.HasIndex(a => a.Status);
 
@@ -108,15 +107,16 @@ namespace CareerTrackAI.Data
                       .HasForeignKey(a => a.JobOpportunityId)
                       .OnDelete(DeleteBehavior.Restrict);
 
+                // NoAction بدل SetNull لتجنب multiple cascade paths في SQL Server
                 entity.HasOne(a => a.Resume)
                       .WithMany(r => r.Applications)
                       .HasForeignKey(a => a.ResumeId)
-                      .OnDelete(DeleteBehavior.SetNull);
+                      .OnDelete(DeleteBehavior.NoAction);
 
                 entity.HasOne(a => a.ResumeVersion)
                       .WithMany()
                       .HasForeignKey(a => a.ResumeVersionId)
-                      .OnDelete(DeleteBehavior.SetNull);
+                      .OnDelete(DeleteBehavior.NoAction);
             });
 
             // ==================== RESUME ====================
