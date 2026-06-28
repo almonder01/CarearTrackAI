@@ -78,4 +78,24 @@ namespace CareerTrackAI.DTOs.Dashboard
         /// </summary>
         public int DaysRemaining { get; set; }
     }
+
+    public class FirstRunChecklistResponse
+    {
+        public int Completed { get; set; }
+        public int Total { get; set; }
+        public bool IsComplete => Total > 0 && Completed == Total;
+        public List<FirstRunChecklistItem> Items { get; set; } = new();
+    }
+
+    public class FirstRunChecklistItem
+    {
+        public string Id { get; set; } = string.Empty;
+        public string Title { get; set; } = string.Empty;
+        public string Description { get; set; } = string.Empty;
+        public string Route { get; set; } = string.Empty;
+        public string ActionLabel { get; set; } = string.Empty;
+        public bool Completed { get; set; }
+        public int? Count { get; set; }
+        public string? Status { get; set; }
+    }
 }

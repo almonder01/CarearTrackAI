@@ -20,6 +20,8 @@ namespace CareerTrackAI.Models
         // Navigation
         public ICollection<Application> Applications { get; set; } = new List<Application>();
         public ICollection<Resume> Resumes { get; set; } = new List<Resume>();
+        public ICollection<Company> Companies { get; set; } = new List<Company>();
+        public ICollection<JobOpportunity> JobOpportunities { get; set; } = new List<JobOpportunity>();
         public ICollection<Notification> Notifications { get; set; } = new List<Notification>();
         public ICollection<RefreshToken> RefreshTokens { get; set; } = new List<RefreshToken>();
     }

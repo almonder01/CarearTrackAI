@@ -63,9 +63,17 @@ namespace CareerTrackAI.Data
                 entity.Property(c => c.Name).IsRequired().HasMaxLength(200);
                 entity.Property(c => c.Website).HasMaxLength(500);
                 entity.Property(c => c.Email).HasMaxLength(255);
+                entity.Property(c => c.SourceProvider).HasMaxLength(100);
+                entity.HasIndex(c => c.UserId);
                 entity.HasIndex(c => c.Country);
                 entity.HasIndex(c => c.City);
                 entity.HasIndex(c => c.Industry);
+                entity.HasIndex(c => c.SourceProvider);
+
+                entity.HasOne(c => c.User)
+                      .WithMany(u => u.Companies)
+                      .HasForeignKey(c => c.UserId)
+                      .OnDelete(DeleteBehavior.SetNull);
             });
 
             // ==================== JOB OPPORTUNITY ====================
@@ -74,17 +82,25 @@ namespace CareerTrackAI.Data
                 entity.Property(j => j.Title).IsRequired().HasMaxLength(200);
                 entity.Property(j => j.Type).HasConversion<string>();
                 entity.Property(j => j.EmploymentType).HasConversion<string>();
+                entity.Property(j => j.SourceProvider).HasMaxLength(100);
                 entity.Property(j => j.SalaryMin).HasPrecision(18, 2);
                 entity.Property(j => j.SalaryMax).HasPrecision(18, 2);
 
                 entity.HasIndex(j => j.Type);
+                entity.HasIndex(j => j.UserId);
                 entity.HasIndex(j => j.IsActive);
+                entity.HasIndex(j => j.SourceProvider);
                 entity.HasIndex(j => j.ApplicationDeadline);
 
                 entity.HasOne(j => j.Company)
                       .WithMany(c => c.JobOpportunities)
                       .HasForeignKey(j => j.CompanyId)
                       .OnDelete(DeleteBehavior.Restrict);
+
+                entity.HasOne(j => j.User)
+                      .WithMany(u => u.JobOpportunities)
+                      .HasForeignKey(j => j.UserId)
+                      .OnDelete(DeleteBehavior.SetNull);
             });
 
             // ==================== APPLICATION ====================

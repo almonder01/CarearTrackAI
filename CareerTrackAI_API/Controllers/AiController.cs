@@ -13,10 +13,12 @@ namespace CareerTrackAI.Controllers
     public class AiController : ControllerBase
     {
         private readonly IAiService _aiService;
+        private readonly IGeminiUsageTracker _usageTracker;
 
-        public AiController(IAiService aiService)
+        public AiController(IAiService aiService, IGeminiUsageTracker usageTracker)
         {
             _aiService = aiService;
+            _usageTracker = usageTracker;
         }
 
         // POST /api/ai/chat
@@ -59,6 +61,37 @@ namespace CareerTrackAI.Controllers
             var userId = GetUserId();
             var result = await _aiService.GetRecommendationsAsync(userId);
             return Ok(ApiResponse<RecommendationsResponse>.Ok(result));
+        }
+
+        // GET /api/ai/status
+        [HttpGet("status")]
+        [AllowAnonymous]
+        public IActionResult GetStatus([FromServices] GeminiOptions options)
+        {
+            return Ok(ApiResponse<object>.Ok(new
+            {
+                provider = "Gemini",
+                model = options.ModelId,
+                configured = options.IsConfigured,
+                mode = options.IsConfigured ? "live" : "local-fallback"
+            }));
+        }
+
+        // GET /api/ai/usage
+        [HttpGet("usage")]
+        public IActionResult GetUsage()
+        {
+            var userId = GetUserId();
+            return Ok(ApiResponse<GeminiUsageSummary>.Ok(_usageTracker.GetSummary(userId)));
+        }
+
+        // GET /api/ai/ping
+        [HttpGet("ping")]
+        public async Task<IActionResult> Ping()
+        {
+            var userId = GetUserId();
+            var result = await _aiService.PingAsync(userId);
+            return Ok(ApiResponse<AiPingResponse>.Ok(result));
         }
 
         private int GetUserId() =>

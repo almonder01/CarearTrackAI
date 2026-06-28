@@ -7,6 +7,7 @@ namespace CareerTrackAI.DTOs.JobOpportunity
     public class JobOpportunityResponse
     {
         public int Id { get; set; }
+        public int? UserId { get; set; }
         public string Title { get; set; } = string.Empty;
         public string? Description { get; set; }
 
@@ -27,8 +28,11 @@ namespace CareerTrackAI.DTOs.JobOpportunity
         public DateTime? ApplicationDeadline { get; set; }
         public string? RequiredSkills { get; set; }
         public string? JobUrl { get; set; }
+        public string? SourceUrl { get; set; }
+        public string? SourceProvider { get; set; }
         public bool IsActive { get; set; }
         public bool IsImported { get; set; }
+        public bool IsShared { get; set; }
         public DateTime CreatedAt { get; set; }
 
         public CompanySummary Company { get; set; } = null!;

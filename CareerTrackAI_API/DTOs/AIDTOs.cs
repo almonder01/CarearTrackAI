@@ -59,4 +59,14 @@ namespace CareerTrackAI.DTOs.AI
         public List<string> ApplicationTips { get; set; } = new();
         public string Summary { get; set; } = string.Empty;
     }
+
+    public class AiPingResponse
+    {
+        public bool Success { get; set; }
+        public string Provider { get; set; } = "Gemini";
+        public string Model { get; set; } = string.Empty;
+        public string Mode { get; set; } = string.Empty;
+        public string Message { get; set; } = string.Empty;
+        public string? Reply { get; set; }
+    }
 }

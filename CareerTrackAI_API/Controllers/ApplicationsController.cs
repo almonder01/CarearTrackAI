@@ -61,6 +61,10 @@ namespace CareerTrackAI.Controllers
                 return CreatedAtAction(nameof(GetById), new { id = result.Id },
                     ApiResponse<ApplicationResponse>.Ok(result, "Application created"));
             }
+            catch (InvalidOperationException ex)
+            {
+                return NotFound(ApiResponse<object>.NotFound(ex.Message));
+            }
             catch (Exception)
             {
                 // Unique constraint: نفس المستخدم على نفس الفرصة مرتين

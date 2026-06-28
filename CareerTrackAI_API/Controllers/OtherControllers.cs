@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using System.Text;
 using CareerTrackAI.DTOs.Company;
 using CareerTrackAI.DTOs.Interview;
 using CareerTrackAI.DTOs.JobOpportunity;
@@ -51,16 +52,22 @@ namespace CareerTrackAI.Controllers
     public class CompaniesController : ControllerBase
     {
         private readonly ICompanyService _companyService;
-        public CompaniesController(ICompanyService companyService) => _companyService = companyService;
+        private readonly IDataImportExportService _dataService;
+        public CompaniesController(ICompanyService companyService, IDataImportExportService dataService)
+        {
+            _companyService = companyService;
+            _dataService = dataService;
+        }
 
         // GET /api/companies
         [HttpGet]
         public async Task<IActionResult> GetAll(
             [FromQuery] string? industry,
             [FromQuery] string? city,
-            [FromQuery] string? country)
+            [FromQuery] string? country,
+            [FromQuery] bool includeShared = false)
         {
-            var result = await _companyService.GetAllAsync(industry, city, country);
+            var result = await _companyService.GetAllAsync(GetUserId(), industry, city, country, includeShared);
             return Ok(ApiResponse<object>.Ok(result));
         }
 
@@ -68,7 +75,7 @@ namespace CareerTrackAI.Controllers
         [HttpGet("{id}")]
         public async Task<IActionResult> GetById(int id)
         {
-            var result = await _companyService.GetByIdAsync(id);
+            var result = await _companyService.GetByIdAsync(id, GetUserId(), includeShared: true);
             if (result == null) return NotFound(ApiResponse<object>.NotFound("Company not found"));
             return Ok(ApiResponse<object>.Ok(result));
         }
@@ -81,30 +88,58 @@ namespace CareerTrackAI.Controllers
             if (!ModelState.IsValid)
                 return BadRequest(ApiResponse<object>.Fail("Invalid data"));
 
-            var result = await _companyService.CreateAsync(request);
+            var result = await _companyService.CreateAsync(GetUserId(), request);
             return CreatedAtAction(nameof(GetById), new { id = result.Id },
                 ApiResponse<object>.Ok(result, "Company created"));
         }
 
-        // PUT /api/companies/{id} - Admin only
+        // POST /api/companies/{id}/save-to-workspace
+        [HttpPost("{id}/save-to-workspace")]
+        public async Task<IActionResult> SaveSharedToWorkspace(int id)
+        {
+            var result = await _companyService.SaveSharedAsync(id, GetUserId());
+            if (result == null) return NotFound(ApiResponse<object>.NotFound("Shared company not found"));
+            return Ok(ApiResponse<object>.Ok(result, "Company saved to your workspace"));
+        }
+
+        // PUT /api/companies/{id}
         [HttpPut("{id}")]
-        [Authorize(Roles = "Admin")]
         public async Task<IActionResult> Update(int id, [FromBody] UpdateCompanyRequest request)
         {
-            var result = await _companyService.UpdateAsync(id, request);
+            var result = await _companyService.UpdateAsync(id, GetUserId(), request);
             if (result == null) return NotFound(ApiResponse<object>.NotFound("Company not found"));
             return Ok(ApiResponse<object>.Ok(result, "Company updated"));
         }
 
-        // DELETE /api/companies/{id} - Admin only
+        // DELETE /api/companies/{id}
         [HttpDelete("{id}")]
-        [Authorize(Roles = "Admin")]
         public async Task<IActionResult> Delete(int id)
         {
-            var deleted = await _companyService.DeleteAsync(id);
+            var deleted = await _companyService.DeleteAsync(id, GetUserId());
             if (!deleted) return NotFound(ApiResponse<object>.NotFound("Company not found"));
             return Ok(ApiResponse.OkNoData("Company deleted"));
         }
+
+        // GET /api/companies/export-csv
+        [HttpGet("export-csv")]
+        public async Task<IActionResult> ExportCsv()
+        {
+            var csv = await _dataService.ExportCompaniesCsvAsync(GetUserId());
+            return File(Encoding.UTF8.GetBytes(csv), "text/csv", "careertrack-companies.csv");
+        }
+
+        // POST /api/companies/import-csv - multipart/form-data with "file"
+        [HttpPost("import-csv")]
+        public async Task<IActionResult> ImportCsv(IFormFile file)
+        {
+            if (file == null || file.Length == 0)
+                return BadRequest(ApiResponse<object>.Fail("No file uploaded"));
+
+            var result = await _dataService.ImportCompaniesCsvAsync(file, GetUserId());
+            return Ok(ApiResponse<object>.Ok(result, "Companies imported"));
+        }
+
+        private int GetUserId() => int.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
     }
 
     // ==================== JOB OPPORTUNITIES CONTROLLER ====================
@@ -114,7 +149,23 @@ namespace CareerTrackAI.Controllers
     public class JobOpportunitiesController : ControllerBase
     {
         private readonly IJobOpportunityService _jobService;
-        public JobOpportunitiesController(IJobOpportunityService jobService) => _jobService = jobService;
+        private readonly IDataImportExportService _dataService;
+        private readonly IAdzunaJobImportService _adzunaService;
+        private readonly IJobDataLakeImportService _jobDataLakeService;
+        private readonly IAiSourcingService _aiSourcingService;
+        public JobOpportunitiesController(
+            IJobOpportunityService jobService,
+            IDataImportExportService dataService,
+            IAdzunaJobImportService adzunaService,
+            IJobDataLakeImportService jobDataLakeService,
+            IAiSourcingService aiSourcingService)
+        {
+            _jobService = jobService;
+            _dataService = dataService;
+            _adzunaService = adzunaService;
+            _jobDataLakeService = jobDataLakeService;
+            _aiSourcingService = aiSourcingService;
+        }
 
         // GET /api/job-opportunities
         // GET /api/job-opportunities?type=Internship
@@ -123,9 +174,10 @@ namespace CareerTrackAI.Controllers
         public async Task<IActionResult> GetAll(
             [FromQuery] OpportunityType? type,
             [FromQuery] EmploymentType? employmentType,
-            [FromQuery] int? companyId)
+            [FromQuery] int? companyId,
+            [FromQuery] bool includeShared = false)
         {
-            var result = await _jobService.GetAllAsync(type, employmentType, companyId);
+            var result = await _jobService.GetAllAsync(GetUserId(), type, employmentType, companyId, includeShared);
             return Ok(ApiResponse<object>.Ok(result));
         }
 
@@ -133,7 +185,7 @@ namespace CareerTrackAI.Controllers
         [HttpGet("{id}")]
         public async Task<IActionResult> GetById(int id)
         {
-            var result = await _jobService.GetByIdAsync(id);
+            var result = await _jobService.GetByIdAsync(id, GetUserId(), includeShared: true);
             if (result == null) return NotFound(ApiResponse<object>.NotFound("Opportunity not found"));
             return Ok(ApiResponse<object>.Ok(result));
         }
@@ -146,30 +198,119 @@ namespace CareerTrackAI.Controllers
             if (!ModelState.IsValid)
                 return BadRequest(ApiResponse<object>.Fail("Invalid data"));
 
-            var result = await _jobService.CreateAsync(request);
+            var result = await _jobService.CreateAsync(GetUserId(), request);
             return CreatedAtAction(nameof(GetById), new { id = result.Id },
                 ApiResponse<object>.Ok(result, "Opportunity created"));
         }
 
-        // PUT /api/job-opportunities/{id} - Admin only
+        // PUT /api/job-opportunities/{id}
         [HttpPut("{id}")]
-        [Authorize(Roles = "Admin")]
         public async Task<IActionResult> Update(int id, [FromBody] UpdateJobOpportunityRequest request)
         {
-            var result = await _jobService.UpdateAsync(id, request);
+            var result = await _jobService.UpdateAsync(id, GetUserId(), request);
             if (result == null) return NotFound(ApiResponse<object>.NotFound("Opportunity not found"));
             return Ok(ApiResponse<object>.Ok(result, "Opportunity updated"));
         }
 
-        // DELETE /api/job-opportunities/{id} - Admin only
+        // DELETE /api/job-opportunities/{id}
         [HttpDelete("{id}")]
-        [Authorize(Roles = "Admin")]
         public async Task<IActionResult> Delete(int id)
         {
-            var deleted = await _jobService.DeleteAsync(id);
+            var deleted = await _jobService.DeleteAsync(id, GetUserId());
             if (!deleted) return NotFound(ApiResponse<object>.NotFound("Opportunity not found"));
             return Ok(ApiResponse.OkNoData("Opportunity deleted"));
         }
+
+        // GET /api/job-opportunities/export-csv
+        [HttpGet("export-csv")]
+        public async Task<IActionResult> ExportCsv()
+        {
+            var csv = await _dataService.ExportJobOpportunitiesCsvAsync(GetUserId());
+            return File(Encoding.UTF8.GetBytes(csv), "text/csv", "careertrack-opportunities.csv");
+        }
+
+        // POST /api/job-opportunities/import-csv - multipart/form-data with "file"
+        [HttpPost("import-csv")]
+        public async Task<IActionResult> ImportCsv(IFormFile file)
+        {
+            if (file == null || file.Length == 0)
+                return BadRequest(ApiResponse<object>.Fail("No file uploaded"));
+
+            var result = await _dataService.ImportJobOpportunitiesCsvAsync(file, GetUserId());
+            return Ok(ApiResponse<object>.Ok(result, "Opportunities imported"));
+        }
+
+        // GET /api/job-opportunities/adzuna/countries
+        [HttpGet("adzuna/countries")]
+        public IActionResult GetAdzunaCountries()
+        {
+            return Ok(ApiResponse<object>.Ok(_adzunaService.GetSupportedCountries()));
+        }
+
+        // GET /api/job-opportunities/adzuna/search?what=software&where=Singapore&country=sg&resultsPerPage=20
+        [HttpGet("adzuna/search")]
+        public async Task<IActionResult> SearchAdzuna(
+            [FromQuery] string? what,
+            [FromQuery] string? where,
+            [FromQuery] string? country,
+            [FromQuery] int resultsPerPage = 20,
+            [FromQuery] int page = 1)
+        {
+            var result = await _adzunaService.SearchAsync(new AdzunaSearchRequest(what, where, resultsPerPage, page, Country: country), GetUserId());
+            return Ok(ApiResponse<object>.Ok(result, "Adzuna search completed"));
+        }
+
+        // POST /api/job-opportunities/adzuna/import
+        [HttpPost("adzuna/import")]
+        public async Task<IActionResult> ImportAdzuna([FromBody] AdzunaSearchRequest request)
+        {
+            var result = await _adzunaService.ImportAsync(request, GetUserId());
+            return Ok(ApiResponse<object>.Ok(result, "Adzuna opportunities imported"));
+        }
+
+        // GET /api/job-opportunities/jobdatalake/search
+        [HttpGet("jobdatalake/search")]
+        public async Task<IActionResult> SearchJobDataLake(
+            [FromQuery] string? query,
+            [FromQuery] string? semanticQuery,
+            [FromQuery] string? country,
+            [FromQuery] string? remoteType,
+            [FromQuery] string? employmentType,
+            [FromQuery] int perPage = 20,
+            [FromQuery] int page = 1)
+        {
+            var request = new JobDataLakeSearchRequest(query, semanticQuery, country, remoteType, employmentType, perPage, page);
+            var result = await _jobDataLakeService.SearchAsync(request, GetUserId());
+            return Ok(ApiResponse<object>.Ok(result, "JobDataLake search completed"));
+        }
+
+        // POST /api/job-opportunities/jobdatalake/import
+        [HttpPost("jobdatalake/import")]
+        public async Task<IActionResult> ImportJobDataLake([FromBody] JobDataLakeSearchRequest request)
+        {
+            var result = await _jobDataLakeService.ImportAsync(request, GetUserId());
+            return Ok(ApiResponse<object>.Ok(result, "JobDataLake opportunities imported"));
+        }
+
+        // POST /api/job-opportunities/ai-source/search
+        [HttpPost("ai-source/search")]
+        public async Task<IActionResult> SearchWithAi([FromBody] AiSourcingRequest request)
+        {
+            var userId = GetUserId();
+            var result = await _aiSourcingService.SearchAsync(userId, request);
+            return Ok(ApiResponse<object>.Ok(result, "AI sourcing search completed"));
+        }
+
+        // POST /api/job-opportunities/ai-source/import
+        [HttpPost("ai-source/import")]
+        public async Task<IActionResult> ImportWithAi([FromBody] AiSourcingRequest request)
+        {
+            var userId = GetUserId();
+            var result = await _aiSourcingService.ImportAsync(userId, request);
+            return Ok(ApiResponse<object>.Ok(result, "AI sourcing import completed"));
+        }
+
+        private int GetUserId() => int.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
     }
 
     // ==================== INTERVIEWS CONTROLLER ====================
@@ -315,6 +456,15 @@ namespace CareerTrackAI.Controllers
         {
             var userId = GetUserId();
             var result = await _dashboardService.GetStatsAsync(userId);
+            return Ok(ApiResponse<object>.Ok(result));
+        }
+
+        // GET /api/dashboard/first-run-checklist
+        [HttpGet("first-run-checklist")]
+        public async Task<IActionResult> GetFirstRunChecklist()
+        {
+            var userId = GetUserId();
+            var result = await _dashboardService.GetFirstRunChecklistAsync(userId);
             return Ok(ApiResponse<object>.Ok(result));
         }
 

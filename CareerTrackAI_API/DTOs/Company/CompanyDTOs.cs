@@ -5,6 +5,7 @@ namespace CareerTrackAI.DTOs.Company
     public class CompanyResponse
     {
         public int Id { get; set; }
+        public int? UserId { get; set; }
         public string Name { get; set; } = string.Empty;
         public string? Industry { get; set; }
         public string? Description { get; set; }
@@ -15,6 +16,8 @@ namespace CareerTrackAI.DTOs.Company
         public string? Phone { get; set; }
         public string? LinkedInUrl { get; set; }
         public string? LogoUrl { get; set; }
+        public string? SourceProvider { get; set; }
+        public bool IsShared { get; set; }
         public bool IsImported { get; set; }
         public DateTime CreatedAt { get; set; }
     }
@@ -25,11 +28,15 @@ namespace CareerTrackAI.DTOs.Company
     public class CompanySummary
     {
         public int Id { get; set; }
+        public int? UserId { get; set; }
         public string Name { get; set; } = string.Empty;
         public string? Industry { get; set; }
         public string? City { get; set; }
         public string? Country { get; set; }
+        public string? Website { get; set; }
         public string? LogoUrl { get; set; }
+        public string? SourceProvider { get; set; }
+        public bool IsShared { get; set; }
     }
 
     /// <summary>
@@ -68,6 +75,9 @@ namespace CareerTrackAI.DTOs.Company
 
         [MaxLength(500)]
         public string? LogoUrl { get; set; }
+
+        [MaxLength(100)]
+        public string? SourceProvider { get; set; }
     }
 
     /// <summary>
@@ -105,5 +115,15 @@ namespace CareerTrackAI.DTOs.Company
 
         [MaxLength(500)]
         public string? LogoUrl { get; set; }
+
+        [MaxLength(100)]
+        public string? SourceProvider { get; set; }
+    }
+
+    public class SaveSharedCompanyResponse
+    {
+        public CompanyResponse Company { get; set; } = null!;
+        public int OpportunitiesCreated { get; set; }
+        public int OpportunitiesUpdated { get; set; }
     }
 }

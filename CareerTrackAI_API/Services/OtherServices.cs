@@ -148,15 +148,18 @@ namespace CareerTrackAI.Services
     public interface IDashboardService
     {
         Task<DashboardStatsResponse> GetStatsAsync(int userId);
+        Task<FirstRunChecklistResponse> GetFirstRunChecklistAsync(int userId);
     }
 
     public class DashboardService : IDashboardService
     {
         private readonly AppDbContext _db;
+        private readonly GeminiOptions _geminiOptions;
 
-        public DashboardService(AppDbContext db)
+        public DashboardService(AppDbContext db, GeminiOptions geminiOptions)
         {
             _db = db;
+            _geminiOptions = geminiOptions;
         }
 
         public async Task<DashboardStatsResponse> GetStatsAsync(int userId)
@@ -186,6 +189,7 @@ namespace CareerTrackAI.Services
             var deadlineAlerts = await _db.JobOpportunities
                 .Where(j => j.ApplicationDeadline >= now
                     && j.ApplicationDeadline <= now.AddDays(3)
+                    && j.UserId == userId
                     && j.IsActive)
                 .Include(j => j.Company)
                 .OrderBy(j => j.ApplicationDeadline)
@@ -236,6 +240,90 @@ namespace CareerTrackAI.Services
                     ApplicationDeadline = j.ApplicationDeadline!.Value,
                     DaysRemaining = (int)(j.ApplicationDeadline.Value - now).TotalDays
                 }).ToList()
+            };
+        }
+
+        public async Task<FirstRunChecklistResponse> GetFirstRunChecklistAsync(int userId)
+        {
+            var user = await _db.Users.FirstOrDefaultAsync(u => u.Id == userId);
+            var profileReady = user != null
+                && !string.IsNullOrWhiteSpace(user.FullName)
+                && !string.IsNullOrWhiteSpace(user.Major)
+                && !string.IsNullOrWhiteSpace(user.City);
+
+            var resumeCount = await _db.Resumes.CountAsync(r => r.UserId == userId);
+            var companyCount = await _db.Companies.CountAsync(c => c.UserId == userId);
+            var opportunityCount = await _db.JobOpportunities.CountAsync(j => j.UserId == userId && j.IsActive);
+            var applicationCount = await _db.Applications.CountAsync(a => a.UserId == userId);
+
+            var items = new List<FirstRunChecklistItem>
+            {
+                new()
+                {
+                    Id = "profile",
+                    Title = "Complete your profile",
+                    Description = "Add your major and city so matching and AI guidance can use real context.",
+                    Route = "/profile",
+                    ActionLabel = profileReady ? "Review profile" : "Complete profile",
+                    Completed = profileReady
+                },
+                new()
+                {
+                    Id = "resume",
+                    Title = "Add your first CV",
+                    Description = "Upload a resume or create a version that AI can analyze and tailor.",
+                    Route = "/resumes",
+                    ActionLabel = resumeCount > 0 ? "Manage CVs" : "Add CV",
+                    Completed = resumeCount > 0,
+                    Count = resumeCount
+                },
+                new()
+                {
+                    Id = "companies",
+                    Title = "Build your company list",
+                    Description = "Import, search, or add real companies before tracking applications.",
+                    Route = "/data-hub",
+                    ActionLabel = companyCount > 0 ? "Review companies" : "Add companies",
+                    Completed = companyCount > 0,
+                    Count = companyCount
+                },
+                new()
+                {
+                    Id = "opportunities",
+                    Title = "Find real opportunities",
+                    Description = "Use JobDataLake, Adzuna, CSV import, or AI sourcing to create reviewable rows.",
+                    Route = "/data-hub",
+                    ActionLabel = opportunityCount > 0 ? "Review opportunities" : "Find opportunities",
+                    Completed = opportunityCount > 0,
+                    Count = opportunityCount
+                },
+                new()
+                {
+                    Id = "applications",
+                    Title = "Track your first application",
+                    Description = "Move one opportunity into the application pipeline and update its status.",
+                    Route = "/opportunities",
+                    ActionLabel = applicationCount > 0 ? "Open pipeline" : "Track application",
+                    Completed = applicationCount > 0,
+                    Count = applicationCount
+                },
+                new()
+                {
+                    Id = "gemini",
+                    Title = "Connect Gemini",
+                    Description = "Enable live AI for recommendations, chat, resume analysis, and sourcing.",
+                    Route = "/settings",
+                    ActionLabel = _geminiOptions.IsConfigured ? "AI settings" : "Connect Gemini",
+                    Completed = _geminiOptions.IsConfigured,
+                    Status = _geminiOptions.IsConfigured ? "Live" : "Local fallback"
+                }
+            };
+
+            return new FirstRunChecklistResponse
+            {
+                Completed = items.Count(item => item.Completed),
+                Total = items.Count,
+                Items = items
             };
         }
     }

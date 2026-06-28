@@ -13,11 +13,13 @@ namespace CareerTrackAI.Controllers
     public class ResumesController : ControllerBase
     {
         private readonly IResumeService _resumeService;
+        private readonly IResumeTextExtractionService _textExtractionService;
         private readonly IWebHostEnvironment _env;
 
-        public ResumesController(IResumeService resumeService, IWebHostEnvironment env)
+        public ResumesController(IResumeService resumeService, IResumeTextExtractionService textExtractionService, IWebHostEnvironment env)
         {
             _resumeService = resumeService;
+            _textExtractionService = textExtractionService;
             _env = env;
         }
 
@@ -55,12 +57,21 @@ namespace CareerTrackAI.Controllers
                 return BadRequest(ApiResponse<object>.Fail("Only PDF and DOCX files are allowed"));
 
             var userId = GetUserId();
-            var fileUrl = await SaveFileAsync(file, userId);
+            var saved = await SaveFileAsync(file, userId);
             var fileType = file.ContentType.Contains("pdf") ? "pdf" : "docx";
+            string? parsedContent = null;
+            try
+            {
+                parsedContent = await _textExtractionService.ExtractAsync(saved.FilePath, fileType);
+            }
+            catch
+            {
+                parsedContent = null;
+            }
 
-            var result = await _resumeService.CreateAsync(userId, label, fileUrl, fileType, null);
+            var result = await _resumeService.CreateAsync(userId, label, saved.FileUrl, fileType, parsedContent);
             return CreatedAtAction(nameof(GetById), new { id = result.Id },
-                ApiResponse<object>.Ok(result, "Resume uploaded"));
+                ApiResponse<object>.Ok(result, string.IsNullOrWhiteSpace(parsedContent) ? "Resume uploaded, but text could not be extracted." : "Resume uploaded and text extracted"));
         }
 
         // DELETE /api/resumes/{id}
@@ -101,7 +112,7 @@ namespace CareerTrackAI.Controllers
         }
 
         // ==================== HELPERS ====================
-        private async Task<string> SaveFileAsync(IFormFile file, int userId)
+        private async Task<(string FileUrl, string FilePath)> SaveFileAsync(IFormFile file, int userId)
         {
             var uploadsFolder = Path.Combine(_env.WebRootPath ?? "wwwroot", "uploads", "resumes", userId.ToString());
             Directory.CreateDirectory(uploadsFolder);
@@ -112,7 +123,7 @@ namespace CareerTrackAI.Controllers
             using var stream = new FileStream(filePath, FileMode.Create);
             await file.CopyToAsync(stream);
 
-            return $"/uploads/resumes/{userId}/{fileName}";
+            return ($"/uploads/resumes/{userId}/{fileName}", filePath);
         }
 
         private int GetUserId() => int.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);

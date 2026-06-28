@@ -4,6 +4,7 @@ namespace CareerTrackAI.Models
 {
     public class JobOpportunity : BaseEntity
     {
+        public int? UserId { get; set; }
         public string Title { get; set; } = string.Empty;
         public string? Description { get; set; }
 
@@ -29,6 +30,7 @@ namespace CareerTrackAI.Models
         public bool IsImported { get; set; } = false;
         public DateTime? ImportedAt { get; set; }
         public string? SourceUrl { get; set; }
+        public string? SourceProvider { get; set; }
 
         /// <summary>
         /// false بعد انتهاء Deadline أو بقرار Admin
@@ -38,6 +40,7 @@ namespace CareerTrackAI.Models
         // FK
         public int CompanyId { get; set; }
         public Company Company { get; set; } = null!;
+        public User? User { get; set; }
 
         // Navigation
         public ICollection<Application> Applications { get; set; } = new List<Application>();

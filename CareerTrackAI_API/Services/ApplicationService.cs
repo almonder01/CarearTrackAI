@@ -60,6 +60,10 @@ namespace CareerTrackAI.Services
 
         public async Task<ApplicationResponse> CreateAsync(int userId, CreateApplicationRequest request)
         {
+            var job = await _db.JobOpportunities.FirstOrDefaultAsync(j => j.Id == request.JobOpportunityId && (j.UserId == userId || j.UserId == null));
+            if (job == null)
+                throw new InvalidOperationException("Opportunity is not available in this workspace.");
+
             var application = new Application
             {
                 UserId = userId,
@@ -148,6 +152,7 @@ namespace CareerTrackAI.Services
             JobOpportunity = new DTOs.JobOpportunity.JobOpportunityResponse
             {
                 Id = a.JobOpportunity.Id,
+                UserId = a.JobOpportunity.UserId,
                 Title = a.JobOpportunity.Title,
                 Description = a.JobOpportunity.Description,
                 Type = a.JobOpportunity.Type.ToString(),
@@ -159,17 +164,24 @@ namespace CareerTrackAI.Services
                 ApplicationDeadline = a.JobOpportunity.ApplicationDeadline,
                 RequiredSkills = a.JobOpportunity.RequiredSkills,
                 JobUrl = a.JobOpportunity.JobUrl,
+                SourceUrl = a.JobOpportunity.SourceUrl,
+                SourceProvider = a.JobOpportunity.SourceProvider,
                 IsActive = a.JobOpportunity.IsActive,
                 IsImported = a.JobOpportunity.IsImported,
+                IsShared = a.JobOpportunity.UserId == null,
                 CreatedAt = a.JobOpportunity.CreatedAt,
                 Company = new DTOs.Company.CompanySummary
                 {
                     Id = a.JobOpportunity.Company.Id,
+                    UserId = a.JobOpportunity.Company.UserId,
                     Name = a.JobOpportunity.Company.Name,
                     Industry = a.JobOpportunity.Company.Industry,
                     City = a.JobOpportunity.Company.City,
                     Country = a.JobOpportunity.Company.Country,
-                    LogoUrl = a.JobOpportunity.Company.LogoUrl
+                    Website = a.JobOpportunity.Company.Website,
+                    LogoUrl = a.JobOpportunity.Company.LogoUrl,
+                    SourceProvider = a.JobOpportunity.Company.SourceProvider,
+                    IsShared = a.JobOpportunity.Company.UserId == null
                 }
             },
             Resume = a.Resume == null ? null : new ResumeSummary
