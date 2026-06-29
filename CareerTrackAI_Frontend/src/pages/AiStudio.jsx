@@ -41,6 +41,14 @@ function AiStudio() {
   const [coverLetter, setCoverLetter] = useState(() => readStoredValue(COVER_LETTER_STORAGE_KEY, null))
   const [aiStatus, setAiStatus] = useState(null)
   const [pingResult, setPingResult] = useState(null)
+  const [applications, setApplications] = useState([])
+  const [resumes, setResumes] = useState([])
+  const [selectedApplicationId, setSelectedApplicationId] = useState('')
+  const [selectedResumeId, setSelectedResumeId] = useState('')
+  const [coverNotes, setCoverNotes] = useState('Make it concise and confident.')
+  const [coverLoading, setCoverLoading] = useState(false)
+  const [coverMessage, setCoverMessage] = useState('')
+  const [copied, setCopied] = useState(false)
   const [loading, setLoading] = useState(false)
   const [loadingRecommendations, setLoadingRecommendations] = useState(false)
   const [pinging, setPinging] = useState(false)
@@ -48,6 +56,12 @@ function AiStudio() {
 
   useEffect(() => {
     careerApi.aiStatus().then(setAiStatus).catch(() => null)
+    Promise.all([careerApi.applications().catch(() => []), careerApi.resumes().catch(() => [])]).then(([applicationRows, resumeRows]) => {
+      setApplications(applicationRows)
+      setResumes(resumeRows)
+      if (applicationRows[0]?.id) setSelectedApplicationId(String(applicationRows[0].id))
+      if (resumeRows[0]?.id) setSelectedResumeId(String(resumeRows[0].id))
+    })
   }, [])
 
   useEffect(() => {
@@ -71,6 +85,13 @@ function AiStudio() {
     try {
       const result = await careerApi.recommendations()
       setRecommendations(result)
+    } catch (error) {
+      setRecommendations({
+        summary: error.message || 'AI recommendations are unavailable right now. Please try again later.',
+        companiesToFollow: [],
+        skillsToLearn: [],
+        applicationTips: [],
+      })
     } finally {
       setLoadingRecommendations(false)
     }
@@ -91,13 +112,60 @@ function AiStudio() {
     try {
       const response = await careerApi.aiChat({ message, history: nextHistory })
       setHistory([...nextHistory, { role: 'model', content: response.reply }])
+    } catch (error) {
+      setHistory([...nextHistory, { role: 'model', content: error.message || 'AI chat is unavailable right now. Please try again later.' }])
     } finally {
       setLoading(false)
     }
   }
 
   async function generateCoverLetter() {
-    setCoverLetter(await careerApi.coverLetter({ jobOpportunityId: 11, resumeId: 1, additionalNotes: 'Make it concise and confident.' }))
+    const selectedApplication = applications.find((item) => String(item.id) === String(selectedApplicationId))
+    const jobOpportunityId = selectedApplication?.jobOpportunity?.id
+    if (!jobOpportunityId) {
+      setCoverMessage('Track at least one opportunity in Applications before generating a cover letter.')
+      return
+    }
+
+    setCoverLoading(true)
+    setCoverMessage('')
+    try {
+      setCoverLetter(
+        await careerApi.coverLetter({
+          jobOpportunityId,
+          resumeId: selectedResumeId ? Number(selectedResumeId) : null,
+          additionalNotes: coverNotes,
+        }),
+      )
+      setCoverMessage(`Generated for ${selectedApplication.jobOpportunity.title}.`)
+    } catch (error) {
+      setCoverLetter({
+        subject: 'AI draft unavailable',
+        coverLetter: error.message || 'The cover letter generator is unavailable right now. Please try again later.',
+      })
+    } finally {
+      setCoverLoading(false)
+    }
+  }
+
+  async function copyCoverLetter() {
+    if (!coverLetter?.coverLetter) return
+    const text = `${coverLetter.subject || 'Cover letter'}\n\n${coverLetter.coverLetter}`
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text)
+    } else {
+      const textarea = document.createElement('textarea')
+      textarea.value = text
+      textarea.setAttribute('readonly', '')
+      textarea.style.position = 'fixed'
+      textarea.style.opacity = '0'
+      document.body.appendChild(textarea)
+      textarea.select()
+      document.execCommand('copy')
+      document.body.removeChild(textarea)
+    }
+    setCopied(true)
+    setTimeout(() => setCopied(false), 1400)
   }
 
   async function pingGemini() {
@@ -105,6 +173,15 @@ function AiStudio() {
     setPingResult(null)
     try {
       setPingResult(await careerApi.aiPing())
+    } catch (error) {
+      setPingResult({
+        success: false,
+        provider: 'Gemini',
+        model: aiStatus?.model || 'Gemini',
+        mode: 'error',
+        message: error.message || 'Gemini could not be checked right now.',
+        reply: null,
+      })
     } finally {
       setPinging(false)
     }
@@ -257,19 +334,54 @@ function AiStudio() {
             <FileText className="text-amber-500" />
             <h3 className="font-bold text-slate-950 dark:text-white">Cover letter generator</h3>
           </div>
-          <p className="text-sm leading-6 text-slate-500 dark:text-slate-400">Generate a draft from selected opportunity and resume context.</p>
-          <button onClick={generateCoverLetter} className="btn-secondary mt-4 w-full">
-            <Sparkles size={17} />
-            Generate sample
+          <p className="text-sm leading-6 text-slate-500 dark:text-slate-400">Generate a draft from one tracked application and an optional resume.</p>
+          <div className="mt-4 space-y-3">
+            <label className="block">
+              <span className="label">Application</span>
+              <select className="input mt-2" value={selectedApplicationId} onChange={(event) => setSelectedApplicationId(event.target.value)}>
+                {applications.length === 0 && <option value="">No tracked applications</option>}
+                {applications.map((application) => (
+                  <option key={application.id} value={application.id}>
+                    {application.jobOpportunity?.title || 'Application'} at {application.jobOpportunity?.company?.name || 'Company'}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="block">
+              <span className="label">Resume</span>
+              <select className="input mt-2" value={selectedResumeId} onChange={(event) => setSelectedResumeId(event.target.value)}>
+                <option value="">No resume context</option>
+                {resumes.map((resume) => (
+                  <option key={resume.id} value={resume.id}>
+                    {resume.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="block">
+              <span className="label">Tone and notes</span>
+              <textarea
+                className="input mt-2 min-h-24 resize-y"
+                value={coverNotes}
+                onChange={(event) => setCoverNotes(event.target.value)}
+                placeholder="Mention tone, strengths, or specific skills to emphasize."
+              />
+            </label>
+          </div>
+          <button onClick={generateCoverLetter} disabled={coverLoading || applications.length === 0} className="btn-secondary mt-4 w-full">
+            {coverLoading ? <LoaderCircle className="animate-spin" size={17} /> : <Sparkles size={17} />}
+            {coverLoading ? 'Generating...' : 'Generate cover letter'}
           </button>
+          {coverMessage && <p className="mt-3 text-sm font-semibold text-teal-700 dark:text-teal-300">{coverMessage}</p>}
           {coverLetter && (
             <div className="mt-4 rounded-lg bg-slate-50 p-4 dark:bg-slate-950">
               <div className="mb-2 flex items-center justify-between">
                 <p className="font-bold text-slate-950 dark:text-white">{coverLetter.subject}</p>
-                <button className="rounded-md p-1 text-slate-500 hover:bg-white">
+                <button type="button" onClick={copyCoverLetter} className="rounded-md p-1 text-slate-500 hover:bg-white dark:hover:bg-slate-900" title="Copy cover letter">
                   <Copy size={15} />
                 </button>
               </div>
+              {copied && <p className="mb-2 text-xs font-bold text-emerald-700 dark:text-emerald-300">Copied</p>}
               <pre className="whitespace-pre-wrap text-sm leading-6 text-slate-600 dark:text-slate-300">{coverLetter.coverLetter}</pre>
             </div>
           )}

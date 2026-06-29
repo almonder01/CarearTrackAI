@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import {
   Bot,
@@ -17,7 +17,7 @@ import {
   Trash2,
   Wand2,
 } from 'lucide-react'
-import { careerApi } from '../lib/api.js'
+import { careerApi, friendlyUserMessage } from '../lib/api.js'
 
 const companyHeaders = ['name', 'industry', 'city', 'country', 'website', 'email', 'phone', 'linkedInUrl', 'notes', 'sourceProvider']
 const visibleCompanyFields = ['name', 'industry', 'city', 'country', 'website', 'email', 'sourceProvider']
@@ -138,6 +138,11 @@ function opportunityToRow(item) {
 
 function PreviewPanel({ rows, dataset, source, importResult, operationMessage, importing, onRowChange, onRemove, onClear, onImport, onDownload }) {
   const headers = dataset === 'companies' ? companyHeaders : opportunityHeaders
+  const summarizedErrors = useMemo(() => {
+    const counts = new Map()
+    ;(importResult?.errors || []).forEach((error) => counts.set(error, (counts.get(error) || 0) + 1))
+    return [...counts.entries()].map(([error, count]) => (count > 1 ? `${error} (${count} rows)` : error))
+  }, [importResult])
 
   return (
     <div className="card overflow-hidden">
@@ -180,9 +185,9 @@ function PreviewPanel({ rows, dataset, source, importResult, operationMessage, i
           }`}
         >
           Created {importResult.created}, updated {importResult.updated}, skipped {importResult.skipped}.
-          {importResult.errors?.length > 0 && (
+          {summarizedErrors.length > 0 && (
             <ul className="mt-2 list-disc space-y-1 pl-5">
-              {importResult.errors.map((error) => (
+              {summarizedErrors.map((error) => (
                 <li key={error}>{error}</li>
               ))}
             </ul>
@@ -276,6 +281,7 @@ function DataHub() {
   })
   const [aiSourceResult, setAiSourceResult] = useState(storedPreview.aiSourceResult || null)
   const [loadingAiSource, setLoadingAiSource] = useState(false)
+  const importLockRef = useRef(false)
 
   useEffect(() => {
     careerApi.companies({ includeShared: includeSharedCompanies }).then(setCompanies)
@@ -427,9 +433,11 @@ function DataHub() {
                 requiredSkills: row.requiredSkills || row.skills || 'Communication,Problem Solving',
                 description: row.description || `AI-filled opportunity draft for ${row.title || 'this role'}. Verify details before importing.`,
                 sourceProvider: row.sourceProvider || 'Manual CSV',
-              },
+          },
         ),
       )
+    } catch (error) {
+      setAiNote(error.message || 'AI field filling is unavailable right now. You can still edit the preview rows manually.')
     } finally {
       setLoadingAi(false)
     }
@@ -446,7 +454,8 @@ function DataHub() {
   }
 
   async function importPreviewToBackend() {
-    if (previewRows.length === 0) return
+    if (previewRows.length === 0 || importLockRef.current) return
+    importLockRef.current = true
     setImportingPreview(true)
     setOperationMessage('')
     const headers = activeDataset === 'companies' ? companyHeaders : opportunityHeaders
@@ -460,6 +469,7 @@ function DataHub() {
       )
       if (activeDataset === 'companies') careerApi.companies({ includeShared: includeSharedCompanies }).then(setCompanies)
     } finally {
+      importLockRef.current = false
       setImportingPreview(false)
     }
   }
@@ -502,6 +512,26 @@ function DataHub() {
       })
       setAiSourceResult(result)
       setProviderPreview(`AI + ${result.search?.provider || result.plan?.provider || 'provider'} preview`, (result.search?.opportunities || []).map(opportunityToRow))
+    } catch (error) {
+      setAiSourceResult({
+        plan: {
+          provider: aiForm.provider,
+          what: aiForm.prompt,
+          country: aiForm.country,
+          reason: 'AI sourcing could not complete this request.',
+        },
+        search: {
+          provider: aiForm.provider,
+          count: 0,
+          country: aiForm.country,
+          query: aiForm.prompt,
+          configured: false,
+          message: error.message || 'AI sourcing is unavailable right now. Try again later or use Adzuna/JobDataLake directly.',
+          opportunities: [],
+        },
+        importResult: null,
+      })
+      setProviderPreview('AI sourcing unavailable', [])
     } finally {
       setLoadingAiSource(false)
     }
@@ -904,8 +934,12 @@ function DataHub() {
                 <p className="mt-2">Provider: {aiSourceResult.plan.provider}</p>
                 <p>What: {aiSourceResult.plan.what}</p>
                 <p>Country: {aiSourceResult.plan.country || aiForm.country || 'Any'}</p>
-                <p className="mt-2 text-slate-500 dark:text-slate-400">{aiSourceResult.plan.reason}</p>
-                {aiSourceResult.search?.message && <p className="mt-3 rounded-lg bg-amber-50 p-3 text-amber-900 dark:bg-amber-950/40 dark:text-amber-200">{aiSourceResult.search.message}</p>}
+                <p className="mt-2 text-slate-500 dark:text-slate-400">{friendlyUserMessage(aiSourceResult.plan.reason)}</p>
+                {aiSourceResult.search?.message && (
+                  <p className="mt-3 rounded-lg bg-amber-50 p-3 text-amber-900 dark:bg-amber-950/40 dark:text-amber-200">
+                    {friendlyUserMessage(aiSourceResult.search.message, 'AI sourcing is unavailable right now. Try again later or use another provider.')}
+                  </p>
+                )}
               </div>
             )}
           </div>

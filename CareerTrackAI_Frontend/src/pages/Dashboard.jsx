@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { Area, AreaChart, Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
+import { Area, AreaChart, Bar, BarChart, CartesianGrid, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import { ArrowRight, BadgeCheck, BriefcaseBusiness, CheckCircle2, Circle, Clock3, Target, TrendingUp } from 'lucide-react'
 import dayjs from 'dayjs'
 import MetricCard from '../components/MetricCard.jsx'
@@ -108,12 +108,7 @@ function Dashboard() {
   const showCharts = localStorage.getItem('careertrack_show_dashboard_charts') !== 'false'
   const showAiPanels = localStorage.getItem('careertrack_show_ai_panels') !== 'false'
   const statusData = Object.entries(stats.byStatus || {}).map(([name, value]) => ({ name, value }))
-  const trendData = [
-    { week: 'W1', applications: 3, replies: 1 },
-    { week: 'W2', applications: 7, replies: 2 },
-    { week: 'W3', applications: 11, replies: 5 },
-    { week: 'W4', applications: stats.totalApplications, replies: stats.accepted + stats.rejected },
-  ]
+  const trendData = stats.applicationActivity || []
 
   return (
     <div className="space-y-6">
@@ -171,12 +166,18 @@ function Dashboard() {
                       <stop offset="0%" stopColor="#14b8a6" stopOpacity={0.45} />
                       <stop offset="100%" stopColor="#14b8a6" stopOpacity={0.05} />
                     </linearGradient>
+                    <linearGradient id="replies" x1="0" x2="0" y1="0" y2="1">
+                      <stop offset="0%" stopColor="#f59e0b" stopOpacity={0.35} />
+                      <stop offset="100%" stopColor="#f59e0b" stopOpacity={0.04} />
+                    </linearGradient>
                   </defs>
                   <CartesianGrid strokeDasharray="3 3" vertical={false} />
                   <XAxis dataKey="week" tickLine={false} axisLine={false} />
                   <YAxis tickLine={false} axisLine={false} />
                   <Tooltip />
+                  <Legend />
                   <Area dataKey="applications" stroke="#0f766e" fill="url(#activity)" strokeWidth={3} />
+                  <Area dataKey="replies" stroke="#d97706" fill="url(#replies)" strokeWidth={2} />
                 </AreaChart>
               </ResponsiveContainer>
             </div>

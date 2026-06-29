@@ -201,18 +201,64 @@ namespace CareerTrackAI.Services
         {
             using var reader = new StreamReader(file.OpenReadStream(), Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
             var text = await reader.ReadToEndAsync();
-            var lines = text.Split(["\r\n", "\n"], StringSplitOptions.RemoveEmptyEntries);
-            if (lines.Length < 2) return [];
+            var records = ParseCsvRecords(text)
+                .Where(record => record.Any(value => !string.IsNullOrWhiteSpace(value)))
+                .ToList();
+            if (records.Count < 2) return [];
 
-            var headers = ParseLine(lines[0]).Select(Normalize).ToList();
-            return lines.Skip(1).Select(line =>
+            var headers = records[0].Select(Normalize).ToList();
+            return records.Skip(1).Select(values =>
             {
-                var values = ParseLine(line);
                 var row = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
                 for (var i = 0; i < headers.Count; i++)
                     row[headers[i]] = i < values.Count ? values[i] : string.Empty;
                 return row;
             }).ToList();
+        }
+
+        private static List<List<string>> ParseCsvRecords(string text)
+        {
+            var records = new List<List<string>>();
+            var row = new List<string>();
+            var current = new StringBuilder();
+            var quoted = false;
+
+            for (var i = 0; i < text.Length; i++)
+            {
+                var ch = text[i];
+                if (ch == '"' && i + 1 < text.Length && text[i + 1] == '"')
+                {
+                    current.Append('"');
+                    i++;
+                }
+                else if (ch == '"')
+                {
+                    quoted = !quoted;
+                }
+                else if (ch == ',' && !quoted)
+                {
+                    row.Add(current.ToString().Trim());
+                    current.Clear();
+                }
+                else if ((ch == '\n' || ch == '\r') && !quoted)
+                {
+                    if (ch == '\r' && i + 1 < text.Length && text[i + 1] == '\n') i++;
+                    row.Add(current.ToString().Trim());
+                    current.Clear();
+                    records.Add(row);
+                    row = [];
+                }
+                else
+                {
+                    current.Append(ch);
+                }
+            }
+
+            row.Add(current.ToString().Trim());
+            if (row.Any(value => !string.IsNullOrWhiteSpace(value)))
+                records.Add(row);
+
+            return records;
         }
 
         private static List<string> ParseLine(string line)

@@ -221,6 +221,14 @@ namespace CareerTrackAI.Controllers
             return Ok(ApiResponse.OkNoData("Opportunity deleted"));
         }
 
+        // DELETE /api/job-opportunities/clear
+        [HttpDelete("clear")]
+        public async Task<IActionResult> DeleteAll()
+        {
+            var result = await _jobService.DeleteAllAsync(GetUserId());
+            return Ok(ApiResponse<object>.Ok(result, "All personal opportunities deleted"));
+        }
+
         // GET /api/job-opportunities/export-csv
         [HttpGet("export-csv")]
         public async Task<IActionResult> ExportCsv()

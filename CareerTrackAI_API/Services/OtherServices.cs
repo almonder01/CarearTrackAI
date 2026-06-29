@@ -196,6 +196,26 @@ namespace CareerTrackAI.Services
                 .Take(5)
                 .ToListAsync();
 
+            var activityStart = now.Date.AddDays(-21);
+            var activity = Enumerable.Range(0, 4)
+                .Select(index =>
+                {
+                    var from = activityStart.AddDays(index * 7);
+                    var to = index == 3 ? now.Date.AddDays(1) : from.AddDays(7);
+                    return new ApplicationActivityPoint
+                    {
+                        Week = from.ToString("MMM d"),
+                        From = from,
+                        To = to.AddTicks(-1),
+                        Applications = applications.Count(a => a.CreatedAt >= from && a.CreatedAt < to),
+                        Replies = applications.Count(a =>
+                            (a.Status == ApplicationStatus.Accepted || a.Status == ApplicationStatus.Rejected)
+                            && (a.StatusUpdatedAt ?? a.UpdatedAt ?? a.CreatedAt) >= from
+                            && (a.StatusUpdatedAt ?? a.UpdatedAt ?? a.CreatedAt) < to)
+                    };
+                })
+                .ToList();
+
             return new DashboardStatsResponse
             {
                 TotalApplications = total,
@@ -239,7 +259,8 @@ namespace CareerTrackAI.Services
                     JobTitle = j.Title,
                     ApplicationDeadline = j.ApplicationDeadline!.Value,
                     DaysRemaining = (int)(j.ApplicationDeadline.Value - now).TotalDays
-                }).ToList()
+                }).ToList(),
+                ApplicationActivity = activity
             };
         }
 

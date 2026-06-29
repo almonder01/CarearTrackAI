@@ -25,7 +25,13 @@ The app expects the API at:
 VITE_API_BASE_URL=http://localhost:5185/api
 ```
 
-Mock fallback data is enabled by default so the UI can be explored before the backend is running. Set `VITE_USE_MOCKS=false` to require real API responses only.
+Final mode uses real backend responses only:
+
+```bash
+VITE_USE_MOCKS=false
+```
+
+Mock fallback data is available only for UI development. Enable it explicitly with `VITE_USE_MOCKS=true` when the backend is not running.
 
 ## AI mode
 

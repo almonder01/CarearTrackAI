@@ -35,6 +35,7 @@ namespace CareerTrackAI.DTOs.Dashboard
         /// الفرص التي يقترب موعد تقديمها (خلال 3 أيام)
         /// </summary>
         public List<DeadlineAlert> DeadlineAlerts { get; set; } = new();
+        public List<ApplicationActivityPoint> ApplicationActivity { get; set; } = new();
     }
 
     public class StatusBreakdown
@@ -77,6 +78,15 @@ namespace CareerTrackAI.DTOs.Dashboard
         /// كم يوم تبقى - يحسبها الـ Backend
         /// </summary>
         public int DaysRemaining { get; set; }
+    }
+
+    public class ApplicationActivityPoint
+    {
+        public string Week { get; set; } = string.Empty;
+        public DateTime From { get; set; }
+        public DateTime To { get; set; }
+        public int Applications { get; set; }
+        public int Replies { get; set; }
     }
 
     public class FirstRunChecklistResponse

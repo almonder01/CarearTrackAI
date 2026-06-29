@@ -1,6 +1,7 @@
 using CareerTrackAI.Data;
 using CareerTrackAI.DTOs.Resume;
 using CareerTrackAI.Models;
+using Microsoft.AspNetCore.Hosting;
 using Microsoft.EntityFrameworkCore;
 
 namespace CareerTrackAI.Services
@@ -18,10 +19,12 @@ namespace CareerTrackAI.Services
     public class ResumeService : IResumeService
     {
         private readonly AppDbContext _db;
+        private readonly IWebHostEnvironment _env;
 
-        public ResumeService(AppDbContext db)
+        public ResumeService(AppDbContext db, IWebHostEnvironment env)
         {
             _db = db;
+            _env = env;
         }
 
         public async Task<List<ResumeResponse>> GetAllAsync(int userId)
@@ -63,12 +66,47 @@ namespace CareerTrackAI.Services
 
         public async Task<bool> DeleteAsync(int id, int userId)
         {
-            var resume = await _db.Resumes.FirstOrDefaultAsync(r => r.Id == id && r.UserId == userId);
+            var resume = await _db.Resumes
+                .Include(r => r.Versions)
+                .FirstOrDefaultAsync(r => r.Id == id && r.UserId == userId);
             if (resume == null) return false;
 
+            var now = DateTime.UtcNow;
+            var filesToDelete = new List<string?> { resume.FileUrl };
+            filesToDelete.AddRange(resume.Versions.Select(version => version.FileUrl));
+
+            var versionIds = resume.Versions.Select(version => version.Id).ToList();
+            var linkedApplications = await _db.Applications
+                .Where(application =>
+                    application.UserId == userId &&
+                    (application.ResumeId == resume.Id || (application.ResumeVersionId.HasValue && versionIds.Contains(application.ResumeVersionId.Value))))
+                .ToListAsync();
+
+            foreach (var application in linkedApplications)
+            {
+                if (application.ResumeId == resume.Id) application.ResumeId = null;
+                if (application.ResumeVersionId.HasValue && versionIds.Contains(application.ResumeVersionId.Value)) application.ResumeVersionId = null;
+                application.UpdatedAt = now;
+            }
+
+            foreach (var version in resume.Versions)
+            {
+                version.IsDeleted = true;
+                version.DeletedAt = now;
+                version.UpdatedAt = now;
+            }
+
             resume.IsDeleted = true;
-            resume.DeletedAt = DateTime.UtcNow;
+            resume.DeletedAt = now;
+            resume.UpdatedAt = now;
             await _db.SaveChangesAsync();
+
+            foreach (var fileUrl in filesToDelete)
+            {
+                DeleteLocalResumeFile(fileUrl, userId);
+            }
+
+            DeleteUserResumeFolderIfEmpty(userId);
             return true;
         }
 
@@ -130,5 +168,51 @@ namespace CareerTrackAI.Services
             TargetCompanyName = v.TargetCompany?.Name,
             CreatedAt = v.CreatedAt
         };
+
+        private void DeleteLocalResumeFile(string? fileUrl, int userId)
+        {
+            var filePath = ResolveLocalResumePath(fileUrl, userId);
+            if (filePath == null || !File.Exists(filePath)) return;
+
+            try
+            {
+                File.Delete(filePath);
+            }
+            catch
+            {
+                // Keep the database deletion successful even if the OS temporarily locks the file.
+            }
+        }
+
+        private string? ResolveLocalResumePath(string? fileUrl, int userId)
+        {
+            if (string.IsNullOrWhiteSpace(fileUrl)) return null;
+
+            var webRoot = Path.GetFullPath(_env.WebRootPath ?? Path.Combine(Directory.GetCurrentDirectory(), "wwwroot"));
+            var allowedRoot = Path.GetFullPath(Path.Combine(webRoot, "uploads", "resumes", userId.ToString()));
+            var relativePath = Uri.UnescapeDataString(fileUrl.TrimStart('/').Replace('/', Path.DirectorySeparatorChar));
+            var fullPath = Path.GetFullPath(Path.Combine(webRoot, relativePath));
+
+            var allowedPrefix = allowedRoot.EndsWith(Path.DirectorySeparatorChar)
+                ? allowedRoot
+                : allowedRoot + Path.DirectorySeparatorChar;
+
+            return fullPath.StartsWith(allowedPrefix, StringComparison.OrdinalIgnoreCase) ? fullPath : null;
+        }
+
+        private void DeleteUserResumeFolderIfEmpty(int userId)
+        {
+            var webRoot = Path.GetFullPath(_env.WebRootPath ?? Path.Combine(Directory.GetCurrentDirectory(), "wwwroot"));
+            var userFolder = Path.GetFullPath(Path.Combine(webRoot, "uploads", "resumes", userId.ToString()));
+            if (!Directory.Exists(userFolder) || Directory.EnumerateFileSystemEntries(userFolder).Any()) return;
+
+            try
+            {
+                Directory.Delete(userFolder);
+            }
+            catch
+            {
+            }
+        }
     }
 }

@@ -14,7 +14,10 @@ namespace CareerTrackAI.Services
         Task<JobOpportunityResponse> CreateAsync(int userId, CreateJobOpportunityRequest request);
         Task<JobOpportunityResponse?> UpdateAsync(int id, int userId, UpdateJobOpportunityRequest request);
         Task<bool> DeleteAsync(int id, int userId);
+        Task<DeleteAllOpportunitiesResult> DeleteAllAsync(int userId);
     }
+
+    public record DeleteAllOpportunitiesResult(int OpportunitiesDeleted, int ApplicationsDeleted, int InterviewsDeleted);
 
     public class JobOpportunityService : IJobOpportunityService
     {
@@ -106,10 +109,65 @@ namespace CareerTrackAI.Services
             var job = await _db.JobOpportunities.FirstOrDefaultAsync(j => j.Id == id && j.UserId == userId);
             if (job == null) return false;
 
+            await SoftDeleteLinkedRowsAsync(new List<int> { job.Id }, userId);
             job.IsDeleted = true;
             job.DeletedAt = DateTime.UtcNow;
             await _db.SaveChangesAsync();
             return true;
+        }
+
+        public async Task<DeleteAllOpportunitiesResult> DeleteAllAsync(int userId)
+        {
+            var jobs = await _db.JobOpportunities
+                .Where(j => j.UserId == userId)
+                .ToListAsync();
+
+            if (jobs.Count == 0)
+                return new DeleteAllOpportunitiesResult(0, 0, 0);
+
+            var now = DateTime.UtcNow;
+            var jobIds = jobs.Select(j => j.Id).ToList();
+            var linkedCounts = await SoftDeleteLinkedRowsAsync(jobIds, userId);
+
+            foreach (var job in jobs)
+            {
+                job.IsDeleted = true;
+                job.DeletedAt = now;
+                job.UpdatedAt = now;
+            }
+
+            await _db.SaveChangesAsync();
+            return new DeleteAllOpportunitiesResult(jobs.Count, linkedCounts.ApplicationsDeleted, linkedCounts.InterviewsDeleted);
+        }
+
+        private async Task<(int ApplicationsDeleted, int InterviewsDeleted)> SoftDeleteLinkedRowsAsync(List<int> jobIds, int userId)
+        {
+            var now = DateTime.UtcNow;
+            var applications = await _db.Applications
+                .Where(a => a.UserId == userId && jobIds.Contains(a.JobOpportunityId))
+                .ToListAsync();
+            var applicationIds = applications.Select(a => a.Id).ToList();
+            var interviews = applicationIds.Count == 0
+                ? new List<Interview>()
+                : await _db.Interviews
+                    .Where(i => applicationIds.Contains(i.ApplicationId))
+                    .ToListAsync();
+
+            foreach (var interview in interviews)
+            {
+                interview.IsDeleted = true;
+                interview.DeletedAt = now;
+                interview.UpdatedAt = now;
+            }
+
+            foreach (var application in applications)
+            {
+                application.IsDeleted = true;
+                application.DeletedAt = now;
+                application.UpdatedAt = now;
+            }
+
+            return (applications.Count, interviews.Count);
         }
 
         private static JobOpportunityResponse MapToResponse(JobOpportunity j) => new()

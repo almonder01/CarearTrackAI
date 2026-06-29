@@ -270,7 +270,15 @@ namespace CareerTrackAI.Services
 
                 var responseBody = await response.Content.ReadAsStringAsync();
                 if (!response.IsSuccessStatusCode)
-                    return new AiSourcingSearchResult(providerLabel, 0, plan.Country ?? request.Country, plan.What, plan.Where ?? string.Empty, true, $"Web scout returned {(int)response.StatusCode}. {responseBody}", []);
+                    return new AiSourcingSearchResult(
+                        providerLabel,
+                        0,
+                        plan.Country ?? request.Country,
+                        plan.What,
+                        plan.Where ?? string.Empty,
+                        true,
+                        FriendlyWebScoutError((int)response.StatusCode, responseBody),
+                        []);
 
                 using var doc = JsonDocument.Parse(responseBody);
                 var text = doc.RootElement
@@ -339,6 +347,24 @@ namespace CareerTrackAI.Services
                 "internship" => "FullTime",
                 _ => null
             };
+        }
+
+        private static string FriendlyWebScoutError(int statusCode, string responseBody)
+        {
+            var raw = responseBody.ToLowerInvariant();
+            if (statusCode == 429 || raw.Contains("quota") || raw.Contains("resource_exhausted") || raw.Contains("rate limit"))
+                return "AI web scouting is connected, but the Gemini quota or daily limit has been reached. Try again later or use Adzuna/JobDataLake directly.";
+
+            if (statusCode is 401 or 403 || raw.Contains("api key") || raw.Contains("permission") || raw.Contains("unauthorized"))
+                return "AI web scouting could not run because Gemini rejected the API key or model access.";
+
+            if (statusCode == 404 || raw.Contains("not found"))
+                return "AI web scouting could not find the configured Gemini model. Check the backend model setting.";
+
+            if (statusCode >= 500)
+                return "AI web scouting is temporarily unavailable from the provider. Try again shortly or use another source.";
+
+            return "AI web scouting could not complete this search. Try broader keywords or use JobDataLake/Adzuna directly.";
         }
 
         private class WebSourcingEnvelope

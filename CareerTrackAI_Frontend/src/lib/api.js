@@ -9,8 +9,8 @@ import {
   mockUser,
 } from '../data/mockData.js'
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'https://localhost:5001/api'
-const USE_MOCKS = import.meta.env.VITE_USE_MOCKS !== 'false'
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5185/api'
+const USE_MOCKS = import.meta.env.VITE_USE_MOCKS === 'true'
 
 export const api = axios.create({
   baseURL: API_BASE_URL,
@@ -51,11 +51,60 @@ api.interceptors.response.use(
 export function unwrap(response) {
   if (response && typeof response === 'object' && 'success' in response) {
     if (!response.success) {
-      throw new Error(response.message || response.errors?.[0] || 'Request failed')
+      throw new Error(friendlyUserMessage(response.message || response.errors?.[0] || 'Request failed'))
     }
     return response.data
   }
   return response
+}
+
+export function friendlyUserMessage(value, fallback = 'The request could not be completed. Please try again.') {
+  const text = typeof value === 'string' ? value : JSON.stringify(value ?? '')
+  const lower = text.toLowerCase()
+
+  if (!text || text === '{}') return fallback
+  if (lower.includes('quota') || lower.includes('resource_exhausted') || lower.includes('rate limit') || lower.includes('429')) {
+    return 'The AI quota or daily limit has been reached. Try again later or switch to another API key.'
+  }
+  if (lower.includes('api key') || lower.includes('apikey') || lower.includes('unauthorized') || lower.includes('permission') || lower.includes('401') || lower.includes('403')) {
+    return 'The AI provider rejected the request. Check the API key permissions and model access.'
+  }
+  if (lower.includes('not configured') || lower.includes('local-fallback')) {
+    return 'The AI provider is not configured yet. Connect a Gemini API key in the backend settings.'
+  }
+  if (lower.includes('model') && (lower.includes('not found') || lower.includes('404'))) {
+    return 'The configured AI model could not be found. Check the backend AI model setting.'
+  }
+  if (lower.includes('socket') || lower.includes('network') || lower.includes('timeout') || lower.includes('timed out') || lower.includes('dns')) {
+    return 'The app could not reach the AI service right now. Check the connection and try again.'
+  }
+  if (
+    lower.includes('request failed with status code') ||
+    lower.includes('response status code') ||
+    lower.includes('internal server error') ||
+    lower.includes('500') ||
+    lower.includes('system.') ||
+    lower.includes('microsoft.') ||
+    lower.includes(' at ') ||
+    text.trim().startsWith('{') ||
+    text.trim().startsWith('<')
+  ) {
+    return 'The requested service is temporarily unavailable. Please try again in a moment.'
+  }
+
+  return text.length > 180 ? fallback : text
+}
+
+function friendlyErrorMessage(error, fallback) {
+  const responseData = error?.response?.data
+  const responseMessage =
+    responseData?.message ||
+    responseData?.errors?.[0] ||
+    responseData?.title ||
+    (typeof responseData === 'string' ? responseData : '')
+  const status = error?.response?.status
+  const combined = [responseMessage, status ? `status ${status}` : '', error?.message || ''].filter(Boolean).join(' ')
+  return friendlyUserMessage(combined, fallback)
 }
 
 export function saveAuth(auth) {
@@ -74,7 +123,7 @@ async function requestWithMock(request, fallback) {
   try {
     return unwrap((await request()).data)
   } catch (error) {
-    if (!USE_MOCKS) throw error
+    if (!USE_MOCKS) throw new Error(friendlyErrorMessage(error, 'The request could not be completed. Please try again.'))
     await new Promise((resolve) => setTimeout(resolve, 220))
     return typeof fallback === 'function' ? fallback() : fallback
   }
@@ -187,6 +236,12 @@ export const careerApi = {
   exportOpportunitiesCsv: async () => (await api.get('/job-opportunities/export-csv', { responseType: 'blob' })).data,
   updateOpportunity: (id, payload) => requestWithMock(() => api.put(`/job-opportunities/${id}`, payload), { id, ...payload }),
   deleteOpportunity: (id) => requestWithMock(() => api.delete(`/job-opportunities/${id}`), null),
+  deleteAllOpportunities: () =>
+    requestWithMock(() => api.delete('/job-opportunities/clear'), {
+      opportunitiesDeleted: 0,
+      applicationsDeleted: 0,
+      interviewsDeleted: 0,
+    }),
   importOpportunitiesCsv: (formData) =>
     requestWithMock(() => api.post('/job-opportunities/import-csv', formData, { headers: { 'Content-Type': 'multipart/form-data' } }), {
       created: 0,

@@ -7,6 +7,7 @@ import {
   CalendarDays,
   FileText,
   Database,
+  CircleHelp,
   LayoutDashboard,
   LogOut,
   PanelLeftClose,
@@ -34,6 +35,7 @@ const navItems = [
   { to: '/profile', label: 'Profile', icon: UserRound },
   { to: '/usage', label: 'Usage', icon: Activity },
   { to: '/settings', label: 'Settings', icon: Settings },
+  { to: '/help', label: 'Help', icon: CircleHelp },
 ]
 
 const pageTitles = {
@@ -47,6 +49,7 @@ const pageTitles = {
   '/profile': ['Profile', 'Keep your matching signals fresh'],
   '/usage': ['Usage', 'Track AI consumption and remaining credits'],
   '/settings': ['Settings', 'Plan, payments, and AI provider configuration'],
+  '/help': ['Help', 'Learn the platform and recommended workflow'],
   '/checkout': ['Checkout', 'Complete plan and payment setup'],
 }
 
@@ -95,7 +98,10 @@ function Layout() {
         .filter((item) => `${item.jobOpportunity?.title} ${item.jobOpportunity?.company?.name} ${item.status} ${item.notes}`.toLowerCase().includes(query))
         .slice(0, 4)
         .map((item) => ({ id: `application-${item.id}`, label: item.jobOpportunity?.title || 'Application', meta: `Application ${item.status}`, to: '/applications' }))
-      setSearchResults([...companyMatches, ...opportunityMatches, ...applicationMatches].slice(0, 8))
+      const helpMatches = ['help guide how to use about workflow steps support']
+        .filter((item) => item.includes(query))
+        .map(() => ({ id: 'help', label: 'Help guide', meta: 'How to use CareerTrackAI', to: '/help' }))
+      setSearchResults([...helpMatches, ...companyMatches, ...opportunityMatches, ...applicationMatches].slice(0, 8))
       setSearchOpen(true)
     }, 250)
 

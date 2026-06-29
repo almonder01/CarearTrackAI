@@ -3,3 +3,21 @@
 **/node_modules/
 **/dist/
 tmp-build/
+
+# Local environment files
+**/.env
+!**/.env.example
+*.local
+
+# Runtime uploads and generated user files
+**/wwwroot/uploads/
+
+# Logs
+*.log
+
+# IDE / OS
+.vs/
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
