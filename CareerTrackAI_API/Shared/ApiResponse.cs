@@ -1,9 +1,6 @@
 namespace CareerTrackAI.Shared
 {
-    /// <summary>
-    /// الـ Response الموحد لجميع الـ Endpoints
-    /// الفرونت اند يتوقع دائماً هذا الشكل
-    /// </summary>
+
     public class ApiResponse<T>
     {
         public bool Success { get; set; }
@@ -11,20 +8,19 @@ namespace CareerTrackAI.Shared
         public string Message { get; set; } = string.Empty;
         public List<string> Errors { get; set; } = new();
 
-        public static ApiResponse<T> Ok(T data, string message = "تم بنجاح") =>
+        public static ApiResponse<T> Ok(T data, string message = "Successfully completed") =>
             new() { Success = true, Data = data, Message = message };
 
         public static ApiResponse<T> Fail(string message, List<string>? errors = null) =>
             new() { Success = false, Message = message, Errors = errors ?? new() };
 
-        public static ApiResponse<T> NotFound(string message = "العنصر غير موجود") =>
+        public static ApiResponse<T> NotFound(string message = "The element doesn't exist") =>
             new() { Success = false, Message = message };
     }
 
-    // نسخة بدون data للعمليات التي ترجع فقط نجاح أو فشل (مثل الحذف)
     public class ApiResponse : ApiResponse<object>
     {
-        public static ApiResponse OkNoData(string message = "تم بنجاح") =>
+        public static ApiResponse OkNoData(string message = "Successfully completed") =>
             new() { Success = true, Message = message };
     }
 }

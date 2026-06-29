@@ -6,6 +6,7 @@ namespace CareerTrackAI.Models
     /// </summary>
     public class Company : BaseEntity
     {
+        public int? UserId { get; set; }
         public string Name { get; set; } = string.Empty;
         public string? Industry { get; set; }
         public string? Description { get; set; }
@@ -21,8 +22,10 @@ namespace CareerTrackAI.Models
         public bool IsImported { get; set; } = false;
         public DateTime? ImportedAt { get; set; }
         public string? SourceUrl { get; set; }
+        public string? SourceProvider { get; set; }
 
         // Navigation
+        public User? User { get; set; }
         public ICollection<JobOpportunity> JobOpportunities { get; set; } = new List<JobOpportunity>();
     }
 }
