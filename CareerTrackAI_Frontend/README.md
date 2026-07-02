@@ -33,17 +33,7 @@ The app expects the backend API at:
 VITE_API_BASE_URL=http://localhost:5185/api
 ```
 
-Final mode uses real backend responses only:
-
-```env
-VITE_USE_MOCKS=false
-```
-
-Mock fallback data is available only for UI development. Enable it explicitly with:
-
-```env
-VITE_USE_MOCKS=true
-```
+The final frontend uses real backend responses only. No mock data fallback is included in the production app.
 
 ## Main Pages
 

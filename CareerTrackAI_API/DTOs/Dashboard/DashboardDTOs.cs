@@ -83,6 +83,7 @@ namespace CareerTrackAI.DTOs.Dashboard
     public class ApplicationActivityPoint
     {
         public string Week { get; set; } = string.Empty;
+        public string Grain { get; set; } = "month";
         public DateTime From { get; set; }
         public DateTime To { get; set; }
         public int Applications { get; set; }

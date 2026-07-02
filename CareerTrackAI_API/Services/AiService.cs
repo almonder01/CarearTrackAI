@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using CareerTrackAI.Data;
 using CareerTrackAI.DTOs.AI;
 using CareerTrackAI.Enums;
@@ -47,14 +48,61 @@ namespace CareerTrackAI.Services
         public async Task<ChatResponse> ChatAsync(int userId, ChatRequest request)
         {
             var user = await _db.Users.FirstOrDefaultAsync(u => u.Id == userId);
+            var applications = await _db.Applications
+                .Where(a => a.UserId == userId)
+                .Include(a => a.JobOpportunity).ThenInclude(j => j.Company)
+                .Include(a => a.Resume)
+                .OrderByDescending(a => a.UpdatedAt ?? a.CreatedAt)
+                .Take(12)
+                .ToListAsync();
+            var opportunities = await _db.JobOpportunities
+                .Where(j => j.UserId == userId && j.IsActive)
+                .Include(j => j.Company)
+                .OrderByDescending(j => j.CreatedAt)
+                .Take(12)
+                .ToListAsync();
+            var resumes = await _db.Resumes
+                .Where(r => r.UserId == userId)
+                .OrderByDescending(r => r.CreatedAt)
+                .Take(8)
+                .ToListAsync();
+            var interviews = await _db.Interviews
+                .Where(i => i.Application.UserId == userId)
+                .Include(i => i.Application).ThenInclude(a => a.JobOpportunity).ThenInclude(j => j.Company)
+                .OrderBy(i => i.ScheduledAt)
+                .Take(8)
+                .ToListAsync();
+
+            var appSummary = applications.Count == 0
+                ? "No tracked applications yet."
+                : string.Join("\n", applications.Select(a =>
+                    $"- #{a.Id}: {a.JobOpportunity.Title} at {a.JobOpportunity.Company.Name}, status {a.Status}, notes: {TrimForPrompt(a.Notes, 80)}"));
+            var opportunitySummary = opportunities.Count == 0
+                ? "No personal opportunities yet."
+                : string.Join("\n", opportunities.Select(j =>
+                    $"- #{j.Id}: {j.Title} at {j.Company.Name}, source {j.SourceProvider ?? "Manual"}, location {j.Location ?? "n/a"}, deadline {j.ApplicationDeadline?.ToString("yyyy-MM-dd") ?? "n/a"}"));
+            var resumeSummary = resumes.Count == 0
+                ? "No CVs uploaded yet."
+                : string.Join("\n", resumes.Select(r =>
+                    $"- #{r.Id}: {r.Label}, type {r.FileType ?? "unknown"}, extracted text: {(string.IsNullOrWhiteSpace(r.ParsedContent) ? "no" : "yes")}"));
+            var interviewSummary = interviews.Count == 0
+                ? "No scheduled interviews yet."
+                : string.Join("\n", interviews.Select(i =>
+                    $"- #{i.Id}: {i.Title} for {i.Application.JobOpportunity.Title} at {i.Application.JobOpportunity.Company.Name}, {i.ScheduledAt:yyyy-MM-dd HH:mm}, {i.Type}, location/link: {TrimForPrompt(i.Location, 80)}"));
 
             var systemPrompt =
                 "You are a professional AI assistant specialized in helping students and graduates find internship and employment opportunities.\n\n" +
+                "Strict scope:\n" +
+                "- Stay focused on CareerTrackAI, career planning, applications, resumes, interviews, job opportunities, and professional development.\n" +
+                "- If the user asks for unrelated general content, politely redirect them back to the career workspace.\n" +
+                "- Do not claim that you changed, created, deleted, imported, or scheduled data unless the backend endpoint actually did it.\n" +
+                "- When suggesting an action inside the app, name the exact page and action.\n\n" +
                 "Current user:\n" +
                 $"- Name: {user?.FullName}\n" +
                 $"- Major: {user?.Major ?? "Not specified"}\n" +
                 $"- University: {user?.University ?? "Not specified"}\n" +
-                $"- City: {user?.City ?? "Not specified"}\n\n" +
+                $"- City: {user?.City ?? "Not specified"}\n" +
+                $"- Career focus: {user?.CareerObjective ?? "Not specified"}\n\n" +
                 "CareerTrackAI app map:\n" +
                 "- Dashboard: overview charts, application progress, and quick metrics.\n" +
                 "- Applications: track each application status and follow-up workflow.\n" +
@@ -65,7 +113,19 @@ namespace CareerTrackAI.Services
                 "- AI Studio: chat, recommendations, and cover letter drafts.\n" +
                 "- Usage: monitor Gemini, Adzuna, and JobDataLake usage.\n" +
                 "- Settings: theme, layout, plan, notification, and AI/payment settings.\n\n" +
-                "When users ask how to do something in the app, guide them to the exact page and action. Do not claim you changed data unless a backend tool actually performed it.\n\n" +
+                "Current workspace snapshot:\n" +
+                $"Applications:\n{appSummary}\n\n" +
+                $"Opportunities:\n{opportunitySummary}\n\n" +
+                $"CVs:\n{resumeSummary}\n\n" +
+                $"Interviews:\n{interviewSummary}\n\n" +
+                "Detailed page behavior:\n" +
+                "- Data Hub is for importing, editing preview rows, saving shared companies, and sending selected rows to the user's workspace.\n" +
+                "- Opportunities is for reviewing imported roles, opening posting links, verifying links, tracking applications, filtering by source, exporting CSV, and deleting opportunity rows.\n" +
+                "- Applications is the Kanban board where status changes are made.\n" +
+                "- Interviews is where Interview-stage applications become schedulable cards with dates, links, and prep notes.\n" +
+                "- Resumes is where CVs are uploaded, analyzed, and deleted.\n" +
+                "- AI Studio contains this chat, recommendations, token test, and cover letter generation from a selected tracked application.\n\n" +
+                "When users ask how to do something in the app, guide them to the exact page and action.\n\n" +
                 "Always respond in the same language used by the user. Keep your answers concise, helpful, and professional.";
 
             var contents = new List<object>();
@@ -92,6 +152,7 @@ namespace CareerTrackAI.Services
         // ==================== ANALYZE RESUME ====================
         public async Task<AnalyzeResumeResponse> AnalyzeResumeAsync(int resumeId, int userId)
         {
+            var user = await _db.Users.AsNoTracking().FirstOrDefaultAsync(u => u.Id == userId);
             var resume = await _db.Resumes
                 .FirstOrDefaultAsync(r => r.Id == resumeId && r.UserId == userId);
 
@@ -109,7 +170,7 @@ namespace CareerTrackAI.Services
             if (resume != null && string.IsNullOrWhiteSpace(resume.ParsedContent) && _isConfigured)
             {
                 var filePath = ResolveResumePath(resume.FileUrl);
-                var fileResult = await AnalyzeResumeFileWithGeminiAsync(userId, resume.FileType ?? "pdf", filePath);
+                var fileResult = await AnalyzeResumeFileWithGeminiAsync(userId, resume.FileType ?? "pdf", filePath, user);
                 if (fileResult != null) return fileResult;
             }
 
@@ -120,7 +181,8 @@ namespace CareerTrackAI.Services
                     Weaknesses = new List<string> { "Resume text has not been extracted yet, so live analysis cannot inspect the actual content." },
                     MissingSkills = new List<string> { "Add text extraction or paste resume content before relying on detailed skill gaps." },
                     Suggestions = new List<string> { "Upload a text-readable DOCX/PDF, then run analysis again.", "Use the CV label and target role to keep versions organized." },
-                    OverallScore = 0
+                    OverallScore = 0,
+                    ScoreBreakdown = BuildEmptyResumeBreakdown()
                 };
 
             var jsonSchema =
@@ -129,12 +191,31 @@ namespace CareerTrackAI.Services
                 "  \"weaknesses\": [\"Weakness 1\"],\n" +
                 "  \"missingSkills\": [\"Missing Skill 1\"],\n" +
                 "  \"suggestions\": [\"Suggestion 1\"],\n" +
-                "  \"overallScore\": 75\n" +
+                "  \"overallScore\": 75,\n" +
+                "  \"scoreBreakdown\": {\n" +
+                "    \"Role alignment\": 20,\n" +
+                "    \"Skills evidence\": 18,\n" +
+                "    \"Project impact\": 15,\n" +
+                "    \"ATS clarity\": 15,\n" +
+                "    \"Experience structure\": 12,\n" +
+                "    \"Professional polish\": 10\n" +
+                "  }\n" +
                 "}";
 
             var prompt =
-                "Analyze the following resume and return your response in JSON format only, without any additional text.\n\n" +
+                "Analyze the following resume using this employer-style screening rubric and return JSON only.\n\n" +
+                "Rubric, total 100 points:\n" +
+                "- Role alignment, 20 points: relevance to software, internship, graduate, or stated target roles.\n" +
+                "- Skills evidence, 20 points: clear technical and soft skills backed by examples.\n" +
+                "- Project impact, 20 points: measurable outcomes, responsibilities, and project complexity.\n" +
+                "- ATS clarity, 15 points: readable structure, keywords, section clarity, and scanability.\n" +
+                "- Experience structure, 15 points: education, experience, dates, and achievements are organized.\n" +
+                "- Professional polish, 10 points: concise language, grammar, consistency, and no obvious gaps.\n\n" +
+                "The scoreBreakdown values must add up to overallScore and must not exceed the category maximums above.\n\n" +
                 jsonSchema + "\n\n" +
+                "Target profile:\n" +
+                $"- Major: {user?.Major ?? "Not specified"}\n" +
+                $"- Career Focus: {user?.CareerObjective ?? "Not specified"}\n\n" +
                 "Resume:\n" +
                 resume.ParsedContent;
 
@@ -143,11 +224,11 @@ namespace CareerTrackAI.Services
                 new { role = "user", parts = new[] { new { text = prompt } } }
             };
 
-            var raw = await CallGeminiAsync(userId, "Resume analysis", null, contents, () => ResumeAnalysisFallbackJson());
+            var raw = await CallGeminiAsync(userId, "Resume analysis", null, contents, () => ResumeAnalysisFallbackJson(resume.ParsedContent));
             var parsed = ParseJsonResponse<AnalyzeResumeResponse>(raw);
             return IsUsefulAnalysis(parsed)
                 ? parsed!
-                : ParseJsonResponse<AnalyzeResumeResponse>(ResumeAnalysisFallbackJson())!;
+                : ParseJsonResponse<AnalyzeResumeResponse>(ResumeAnalysisFallbackJson(resume.ParsedContent))!;
         }
 
         // ==================== GENERATE COVER LETTER ====================
@@ -183,6 +264,7 @@ namespace CareerTrackAI.Services
                 $"- Name: {user?.FullName}\n" +
                 $"- Major: {user?.Major}\n" +
                 $"- University: {user?.University}\n" +
+                $"- Career Focus: {user?.CareerObjective ?? "Not specified"}\n" +
                 (string.IsNullOrEmpty(resumeContext) ? "" : $"- Resume Summary: {resumeContext[..Math.Min(500, resumeContext.Length)]}\n") +
                 "\nJob Information:\n" +
                 $"- Title: {job.Title}\n" +
@@ -239,6 +321,7 @@ namespace CareerTrackAI.Services
                 "User Information:\n" +
                 $"- Major: {user?.Major ?? "Not specified"}\n" +
                 $"- City: {user?.City ?? "Not specified"}\n" +
+                $"- Career Focus: {user?.CareerObjective ?? "Not specified"}\n" +
                 $"- Total Applications: {totalApps}\n" +
                 $"- Accepted: {accepted}\n" +
                 $"- Rejected: {rejected}\n" +
@@ -428,7 +511,7 @@ namespace CareerTrackAI.Services
             return ExtractGeminiText(root);
         }
 
-        private async Task<AnalyzeResumeResponse?> AnalyzeResumeFileWithGeminiAsync(int userId, string fileType, string filePath)
+        private async Task<AnalyzeResumeResponse?> AnalyzeResumeFileWithGeminiAsync(int userId, string fileType, string filePath, Models.User? user)
         {
             if (!File.Exists(filePath)) return null;
 
@@ -446,7 +529,15 @@ namespace CareerTrackAI.Services
                 "  \"weaknesses\": [\"Weakness 1\"],\n" +
                 "  \"missingSkills\": [\"Missing Skill 1\"],\n" +
                 "  \"suggestions\": [\"Suggestion 1\"],\n" +
-                "  \"overallScore\": 75\n" +
+                "  \"overallScore\": 75,\n" +
+                "  \"scoreBreakdown\": {\n" +
+                "    \"Role alignment\": 20,\n" +
+                "    \"Skills evidence\": 18,\n" +
+                "    \"Project impact\": 15,\n" +
+                "    \"ATS clarity\": 15,\n" +
+                "    \"Experience structure\": 12,\n" +
+                "    \"Professional polish\": 10\n" +
+                "  }\n" +
                 "}";
 
             var requestBody = new Dictionary<string, object>
@@ -460,7 +551,12 @@ namespace CareerTrackAI.Services
                         {
                             new Dictionary<string, object>
                             {
-                                ["text"] = "Analyze this resume file and return valid JSON only using this shape:\n\n" + jsonSchema
+                                ["text"] =
+                                    "Analyze this resume file using an employer-style screening rubric and return valid JSON only using this shape:\n\n" +
+                                    "Rubric: Role alignment 20, Skills evidence 20, Project impact 20, ATS clarity 15, Experience structure 15, Professional polish 10. " +
+                                    "The scoreBreakdown values must add up to overallScore.\n\n" +
+                                    $"Target profile: Major {user?.Major ?? "Not specified"}; Career focus {user?.CareerObjective ?? "Not specified"}.\n\n" +
+                                    jsonSchema
                             },
                             new Dictionary<string, object>
                             {
@@ -550,15 +646,83 @@ namespace CareerTrackAI.Services
                 $"Your question was: \"{message}\".";
         }
 
-        private static string ResumeAnalysisFallbackJson() =>
-            JsonSerializer.Serialize(new AnalyzeResumeResponse
+        private static string TrimForPrompt(string? value, int maxLength)
+        {
+            if (string.IsNullOrWhiteSpace(value)) return "none";
+            var text = value.Replace("\r", " ").Replace("\n", " ").Trim();
+            return text.Length <= maxLength ? text : text[..maxLength] + "...";
+        }
+
+        private static string ResumeAnalysisFallbackJson(string? resumeText = null)
+        {
+            var local = BuildLocalResumeAnalysis(resumeText);
+            return JsonSerializer.Serialize(local);
+        }
+
+        private static AnalyzeResumeResponse BuildLocalResumeAnalysis(string? resumeText)
+        {
+            var text = (resumeText ?? string.Empty).ToLowerInvariant();
+            var hasText = text.Length > 80;
+            var techMatches = CountMatches(text, "react", "javascript", "typescript", "c#", ".net", "asp.net", "sql", "python", "java", "api", "git", "cloud", "ai", "machine learning");
+            var sectionMatches = CountMatches(text, "education", "experience", "projects", "skills", "certifications", "summary");
+            var hasMetrics = Regex.IsMatch(text, @"\b\d+(\.\d+)?\s*(%|percent|users|projects|apis|requests|seconds|ms|hours|days)\b");
+            var hasDates = Regex.IsMatch(text, @"\b(20\d{2}|19\d{2})\b");
+            var hasLinks = text.Contains("github") || text.Contains("linkedin") || text.Contains("portfolio") || text.Contains("http");
+            var hasProjects = text.Contains("project") || text.Contains("capstone") || text.Contains("built") || text.Contains("developed");
+            var hasRoleSignals = CountMatches(text, "software", "developer", "engineer", "frontend", "backend", "full stack", "intern", "web");
+
+            var breakdown = new Dictionary<string, int>
             {
-                Strengths = new() { "Clear academic background", "Relevant project experience", "Good foundation for entry-level roles" },
-                Weaknesses = new() { "Resume parsing or AI provider is not fully configured yet" },
-                MissingSkills = new() { "Measurable project outcomes", "Role-specific keywords", "Interview-ready achievement stories" },
-                Suggestions = new() { "Add numbers to project impact", "Create a tailored version for each company", "Keep skills aligned with job descriptions" },
-                OverallScore = 72
-            });
+                ["Role alignment"] = Clamp((hasRoleSignals * 4) + (hasText ? 4 : 0), 0, 20),
+                ["Skills evidence"] = Clamp((techMatches * 2) + (hasProjects ? 4 : 0), 0, 20),
+                ["Project impact"] = Clamp((hasProjects ? 8 : 0) + (hasMetrics ? 8 : 0) + (text.Contains("improved") || text.Contains("reduced") || text.Contains("optimized") ? 4 : 0), 0, 20),
+                ["ATS clarity"] = Clamp((sectionMatches * 3) + (hasLinks ? 3 : 0), 0, 15),
+                ["Experience structure"] = Clamp((hasDates ? 5 : 0) + (text.Contains("university") || text.Contains("degree") || text.Contains("diploma") ? 5 : 0) + (text.Contains("experience") ? 5 : 0), 0, 15),
+                ["Professional polish"] = Clamp((hasText ? 4 : 0) + (text.Length is > 800 and < 7000 ? 3 : 0) + (hasLinks ? 3 : 0), 0, 10)
+            };
+
+            var score = breakdown.Values.Sum();
+            return new AnalyzeResumeResponse
+            {
+                Strengths = new()
+                {
+                    hasProjects ? "Projects are visible and can support role fit." : "The resume has a readable structure for initial screening.",
+                    techMatches >= 4 ? "Technical keywords are present for ATS matching." : "The resume can be adapted toward the target role.",
+                    hasLinks ? "Portfolio or profile links help recruiters verify work." : "The resume is ready for basic tracking and improvement."
+                },
+                Weaknesses = new()
+                {
+                    hasMetrics ? "Some impact is present, but each major project should still show clearer outcomes." : "Project impact needs measurable outcomes.",
+                    sectionMatches >= 4 ? "Sections are present, but ordering and relevance should be checked against each job." : "Standard sections such as Skills, Projects, and Experience should be clearer."
+                },
+                MissingSkills = techMatches >= 6
+                    ? new() { "Role-specific keywords from the exact job description", "Interview-ready achievement stories" }
+                    : new() { "More role-specific technical keywords", "Measurable project outcomes", "Links to GitHub, LinkedIn, or portfolio work" },
+                Suggestions = new()
+                {
+                    "Tailor the top skills and first project to the target role.",
+                    "Add numbers to show scope, users, performance, or results.",
+                    "Keep section headings ATS-friendly: Skills, Projects, Education, Experience."
+                },
+                OverallScore = score,
+                ScoreBreakdown = breakdown
+            };
+        }
+
+        private static int CountMatches(string text, params string[] needles) =>
+            needles.Count(needle => text.Contains(needle, StringComparison.OrdinalIgnoreCase));
+
+        private static int Clamp(int value, int min, int max) => Math.Min(max, Math.Max(min, value));
+
+        private static Dictionary<string, int> BuildEmptyResumeBreakdown() => new()
+        {
+            ["Role alignment"] = 0,
+            ["Skills evidence"] = 0,
+            ["Project impact"] = 0,
+            ["ATS clarity"] = 0,
+            ["Experience structure"] = 0,
+            ["Professional polish"] = 0
+        };
 
         private static bool IsUsefulAnalysis(AnalyzeResumeResponse? response) =>
             response != null &&
@@ -583,7 +747,7 @@ namespace CareerTrackAI.Services
             JsonSerializer.Serialize(new RecommendationsResponse
             {
                 Summary = "Live AI is unavailable for this request, so these recommendations are generated locally from your profile and application counts.",
-                CompaniesToFollow = new() { "STC", "Mozn", "Tamara", "Aramco Digital" },
+                CompaniesToFollow = new(),
                 SkillsToLearn = new() { "Resume tailoring", "Interview storytelling", user?.Major == "Software Engineering" ? "React testing" : "Role-specific portfolio work" },
                 ApplicationTips = new()
                 {

@@ -14,7 +14,7 @@ import {
   PanelLeftOpen,
   Search,
   Settings,
-  Sparkles,
+  ShieldCheck,
   Activity,
   UserRound,
   Workflow,
@@ -23,6 +23,8 @@ import {
 import clsx from 'clsx'
 import { useAuth } from '../context/useAuth.js'
 import { careerApi } from '../lib/api.js'
+import BrandMark from './BrandMark.jsx'
+import FloatingAiAgent from './FloatingAiAgent.jsx'
 
 const navItems = [
   { to: '/', label: 'Dashboard', icon: LayoutDashboard },
@@ -35,6 +37,7 @@ const navItems = [
   { to: '/profile', label: 'Profile', icon: UserRound },
   { to: '/usage', label: 'Usage', icon: Activity },
   { to: '/settings', label: 'Settings', icon: Settings },
+  { to: '/admin', label: 'Admin', icon: ShieldCheck, adminOnly: true },
   { to: '/help', label: 'Help', icon: CircleHelp },
 ]
 
@@ -49,8 +52,13 @@ const pageTitles = {
   '/profile': ['Profile', 'Keep your matching signals fresh'],
   '/usage': ['Usage', 'Track AI consumption and remaining credits'],
   '/settings': ['Settings', 'Plan, payments, and AI provider configuration'],
+  '/admin': ['Admin', 'Manage users and administrator access'],
   '/help': ['Help', 'Learn the platform and recommended workflow'],
   '/checkout': ['Checkout', 'Complete plan and payment setup'],
+}
+
+function roleLabel(role) {
+  return role === 'Student' ? 'User' : role || 'User'
 }
 
 function Layout() {
@@ -67,6 +75,7 @@ function Layout() {
   const [searchTerm, setSearchTerm] = useState('')
   const [searchResults, setSearchResults] = useState([])
   const [searchOpen, setSearchOpen] = useState(false)
+  const isAdmin = user?.role?.toLowerCase() === 'admin'
 
   useEffect(() => {
     careerApi.notifications().then(setNotifications).catch(() => null)
@@ -179,14 +188,8 @@ function Layout() {
           isSidebarCollapsed ? 'w-24' : 'w-72',
         )}
       >
-        <div className={clsx('mb-5 flex shrink-0 items-center gap-3 px-2', isSidebarCollapsed && 'justify-center px-0')}>
-          <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-slate-950 text-white">
-            <Sparkles size={22} />
-          </div>
-          <div className={clsx(isSidebarCollapsed && 'hidden')}>
-            <p className="text-base font800 font-bold tracking-tight">CareerTrack AI</p>
-            <p className="text-xs text-slate-500">Smart career operating system</p>
-          </div>
+        <div className="mb-5 shrink-0 px-2">
+          <BrandMark compact={isSidebarCollapsed} />
         </div>
 
         <button
@@ -199,7 +202,7 @@ function Layout() {
         </button>
 
         <nav className="min-h-0 flex-1 space-y-1 overflow-y-auto pr-1">
-          {navItems.map(({ to, label, icon: Icon }) => (
+          {navItems.filter((item) => !item.adminOnly || isAdmin).map(({ to, label, icon: Icon }) => (
             <NavLink
               key={to}
               to={to}
@@ -334,8 +337,8 @@ function Layout() {
                   {user?.fullName?.slice(0, 1) || 'U'}
                 </div>
                 <div className="hidden text-left sm:block">
-                  <p className="text-sm font-bold text-slate-900 dark:text-slate-100">{user?.fullName || 'Student'}</p>
-                  <p className="text-xs text-slate-500 dark:text-slate-400">{user?.role || 'Student'}</p>
+                  <p className="text-sm font-bold text-slate-900 dark:text-slate-100">{user?.fullName || 'User'}</p>
+                  <p className="text-xs text-slate-500 dark:text-slate-400">{roleLabel(user?.role)}</p>
                 </div>
               </div>
               <button onClick={handleLogout} className="btn-secondary" title="Log out">
@@ -349,6 +352,7 @@ function Layout() {
           <Outlet />
         </div>
       </main>
+      <FloatingAiAgent />
     </div>
   )
 }

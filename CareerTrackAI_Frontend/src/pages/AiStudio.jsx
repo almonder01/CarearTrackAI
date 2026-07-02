@@ -3,18 +3,11 @@ import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { Bot, Copy, FileText, Lightbulb, LoaderCircle, PlugZap, RefreshCw, Send, Sparkles, Trash2 } from 'lucide-react'
 import { careerApi } from '../lib/api.js'
+import { readScopedJson, removeScopedStorage, writeScopedJson } from '../lib/userStorage.js'
 
 const CHAT_HISTORY_STORAGE_KEY = 'careertrack_ai_chat_history'
 const RECOMMENDATIONS_STORAGE_KEY = 'careertrack_ai_recommendations'
 const COVER_LETTER_STORAGE_KEY = 'careertrack_ai_cover_letter'
-
-function readStoredValue(key, fallback) {
-  try {
-    return JSON.parse(localStorage.getItem(key) || JSON.stringify(fallback))
-  } catch {
-    return fallback
-  }
-}
 
 function friendlyGeminiPingMessage(result) {
   const raw = `${result?.message || ''} ${result?.reply || ''}`.toLowerCase()
@@ -36,9 +29,9 @@ function friendlyGeminiPingMessage(result) {
 
 function AiStudio() {
   const [message, setMessage] = useState('How can I improve my chances this week?')
-  const [history, setHistory] = useState(() => readStoredValue(CHAT_HISTORY_STORAGE_KEY, []))
-  const [recommendations, setRecommendations] = useState(() => readStoredValue(RECOMMENDATIONS_STORAGE_KEY, null))
-  const [coverLetter, setCoverLetter] = useState(() => readStoredValue(COVER_LETTER_STORAGE_KEY, null))
+  const [history, setHistory] = useState(() => readScopedJson(CHAT_HISTORY_STORAGE_KEY, []))
+  const [recommendations, setRecommendations] = useState(() => readScopedJson(RECOMMENDATIONS_STORAGE_KEY, null))
+  const [coverLetter, setCoverLetter] = useState(() => readScopedJson(COVER_LETTER_STORAGE_KEY, null))
   const [aiStatus, setAiStatus] = useState(null)
   const [pingResult, setPingResult] = useState(null)
   const [applications, setApplications] = useState([])
@@ -65,15 +58,15 @@ function AiStudio() {
   }, [])
 
   useEffect(() => {
-    localStorage.setItem(CHAT_HISTORY_STORAGE_KEY, JSON.stringify(history))
+    writeScopedJson(CHAT_HISTORY_STORAGE_KEY, history)
   }, [history])
 
   useEffect(() => {
-    if (recommendations) localStorage.setItem(RECOMMENDATIONS_STORAGE_KEY, JSON.stringify(recommendations))
+    if (recommendations) writeScopedJson(RECOMMENDATIONS_STORAGE_KEY, recommendations)
   }, [recommendations])
 
   useEffect(() => {
-    if (coverLetter) localStorage.setItem(COVER_LETTER_STORAGE_KEY, JSON.stringify(coverLetter))
+    if (coverLetter) writeScopedJson(COVER_LETTER_STORAGE_KEY, coverLetter)
   }, [coverLetter])
 
   useEffect(() => {
@@ -99,7 +92,7 @@ function AiStudio() {
 
   function clearChat() {
     setHistory([])
-    localStorage.removeItem(CHAT_HISTORY_STORAGE_KEY)
+    removeScopedStorage(CHAT_HISTORY_STORAGE_KEY)
   }
 
   async function sendMessage(event) {
@@ -306,7 +299,7 @@ function AiStudio() {
             )}
             <button type="button" onClick={pingGemini} disabled={pinging} className="btn-secondary mt-4 w-full">
               {pinging ? <LoaderCircle className="animate-spin" size={17} /> : <PlugZap size={17} />}
-              {pinging ? 'Checking token...' : 'Test Gemini token'}
+              {pinging ? 'Checking connection...' : 'Test Gemini Connection'}
             </button>
             {pingResult && (
               <div

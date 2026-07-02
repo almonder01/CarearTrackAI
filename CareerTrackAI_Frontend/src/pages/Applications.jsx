@@ -4,7 +4,7 @@ import { CSS } from '@dnd-kit/utilities'
 import { Bot, CalendarDays, GripVertical, MoveHorizontal, Trash2 } from 'lucide-react'
 import dayjs from 'dayjs'
 import AiActionPanel from '../components/AiActionPanel.jsx'
-import { applicationStatuses, statusMeta } from '../data/mockData.js'
+import { applicationStatuses, statusMeta } from '../data/applicationStatus.js'
 import { careerApi } from '../lib/api.js'
 
 function KanbanCard({ application, onStatusChange, onDelete }) {
@@ -101,10 +101,16 @@ function KanbanColumn({ status, items, onStatusChange, onDelete }) {
 
 function Applications() {
   const [applications, setApplications] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 8 } }))
 
   useEffect(() => {
-    careerApi.applications().then(setApplications)
+    careerApi
+      .applications()
+      .then(setApplications)
+      .catch((err) => setError(err.message || 'Could not load applications.'))
+      .finally(() => setLoading(false))
   }, [])
 
   const grouped = useMemo(
@@ -146,6 +152,8 @@ function Applications() {
 
   return (
     <div className="space-y-6">
+      {loading && <div className="card text-sm font-semibold text-slate-500 dark:text-slate-400">Loading applications...</div>}
+      {error && <div className="rounded-lg border border-rose-200 bg-rose-50 p-3 text-sm font-semibold text-rose-700 dark:border-rose-800 dark:bg-rose-950/40 dark:text-rose-200">{error}</div>}
       <div className="grid gap-4 xl:grid-cols-[1fr_auto]">
         <AiActionPanel
           title="Pipeline copilot"
@@ -165,6 +173,11 @@ function Applications() {
       </div>
       <DndContext sensors={sensors} onDragEnd={handleDragEnd}>
         <div className="rounded-lg border border-slate-200/80 bg-white/70 p-3 shadow-sm dark:border-slate-800 dark:bg-slate-900/70 dark:shadow-black/20">
+          {!loading && !error && applications.length === 0 && (
+            <div className="mb-3 rounded-lg border border-dashed border-slate-300 bg-slate-50 p-4 text-sm font-semibold text-slate-500 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-400">
+              No applications yet. Track an opportunity from the Opportunities page to start the pipeline.
+            </div>
+          )}
           <div className="flex h-[calc(100vh-310px)] min-h-[430px] gap-4 overflow-x-auto pb-2">
             {applicationStatuses.map((status) => (
               <KanbanColumn key={status} status={status} items={grouped[status] || []} onStatusChange={changeStatus} onDelete={deleteApplication} />

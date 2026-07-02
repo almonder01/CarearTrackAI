@@ -53,10 +53,12 @@ namespace CareerTrackAI.Controllers
     {
         private readonly ICompanyService _companyService;
         private readonly IDataImportExportService _dataService;
-        public CompaniesController(ICompanyService companyService, IDataImportExportService dataService)
+        private readonly IAiSourcingService _aiSourcingService;
+        public CompaniesController(ICompanyService companyService, IDataImportExportService dataService, IAiSourcingService aiSourcingService)
         {
             _companyService = companyService;
             _dataService = dataService;
+            _aiSourcingService = aiSourcingService;
         }
 
         // GET /api/companies
@@ -88,7 +90,7 @@ namespace CareerTrackAI.Controllers
             if (!ModelState.IsValid)
                 return BadRequest(ApiResponse<object>.Fail("Invalid data"));
 
-            var result = await _companyService.CreateAsync(GetUserId(), request);
+            var result = await _companyService.CreateAsync(null, request);
             return CreatedAtAction(nameof(GetById), new { id = result.Id },
                 ApiResponse<object>.Ok(result, "Company created"));
         }
@@ -139,6 +141,14 @@ namespace CareerTrackAI.Controllers
             return Ok(ApiResponse<object>.Ok(result, "Companies imported"));
         }
 
+        // POST /api/companies/ai-source/search
+        [HttpPost("ai-source/search")]
+        public async Task<IActionResult> SearchCompaniesWithAi([FromBody] AiSourcingRequest request)
+        {
+            var result = await _aiSourcingService.SearchCompaniesAsync(GetUserId(), request);
+            return Ok(ApiResponse<object>.Ok(result, "AI company sourcing search completed"));
+        }
+
         private int GetUserId() => int.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
     }
 
@@ -153,18 +163,21 @@ namespace CareerTrackAI.Controllers
         private readonly IAdzunaJobImportService _adzunaService;
         private readonly IJobDataLakeImportService _jobDataLakeService;
         private readonly IAiSourcingService _aiSourcingService;
+        private readonly ILinkVerificationService _linkVerificationService;
         public JobOpportunitiesController(
             IJobOpportunityService jobService,
             IDataImportExportService dataService,
             IAdzunaJobImportService adzunaService,
             IJobDataLakeImportService jobDataLakeService,
-            IAiSourcingService aiSourcingService)
+            IAiSourcingService aiSourcingService,
+            ILinkVerificationService linkVerificationService)
         {
             _jobService = jobService;
             _dataService = dataService;
             _adzunaService = adzunaService;
             _jobDataLakeService = jobDataLakeService;
             _aiSourcingService = aiSourcingService;
+            _linkVerificationService = linkVerificationService;
         }
 
         // GET /api/job-opportunities
@@ -198,9 +211,18 @@ namespace CareerTrackAI.Controllers
             if (!ModelState.IsValid)
                 return BadRequest(ApiResponse<object>.Fail("Invalid data"));
 
-            var result = await _jobService.CreateAsync(GetUserId(), request);
+            var result = await _jobService.CreateAsync(null, request);
             return CreatedAtAction(nameof(GetById), new { id = result.Id },
                 ApiResponse<object>.Ok(result, "Opportunity created"));
+        }
+
+        // POST /api/job-opportunities/{id}/save-to-workspace
+        [HttpPost("{id}/save-to-workspace")]
+        public async Task<IActionResult> SaveSharedToWorkspace(int id)
+        {
+            var result = await _jobService.SaveSharedAsync(id, GetUserId());
+            if (result == null) return NotFound(ApiResponse<object>.NotFound("Shared opportunity not found"));
+            return Ok(ApiResponse<object>.Ok(result, "Opportunity saved to your workspace"));
         }
 
         // PUT /api/job-opportunities/{id}
@@ -316,6 +338,14 @@ namespace CareerTrackAI.Controllers
             var userId = GetUserId();
             var result = await _aiSourcingService.ImportAsync(userId, request);
             return Ok(ApiResponse<object>.Ok(result, "AI sourcing import completed"));
+        }
+
+        // POST /api/job-opportunities/verify-link
+        [HttpPost("verify-link")]
+        public async Task<IActionResult> VerifyLink([FromBody] VerifyOpportunityLinkRequest request)
+        {
+            var result = await _linkVerificationService.VerifyAsync(request);
+            return Ok(ApiResponse<object>.Ok(result, "Link verification completed"));
         }
 
         private int GetUserId() => int.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
@@ -460,10 +490,10 @@ namespace CareerTrackAI.Controllers
 
         // GET /api/dashboard/stats
         [HttpGet("stats")]
-        public async Task<IActionResult> GetStats()
+        public async Task<IActionResult> GetStats([FromQuery] string activityGrain = "month")
         {
             var userId = GetUserId();
-            var result = await _dashboardService.GetStatsAsync(userId);
+            var result = await _dashboardService.GetStatsAsync(userId, activityGrain);
             return Ok(ApiResponse<object>.Ok(result));
         }
 

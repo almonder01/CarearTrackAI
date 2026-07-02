@@ -31,7 +31,7 @@ namespace CareerTrackAI.Services
             var companies = await _db.Companies.Where(c => c.UserId == userId).OrderBy(c => c.Name).ToListAsync();
             var rows = new List<string>
             {
-                "name,industry,description,city,country,website,email,phone,linkedInUrl,logoUrl,sourceProvider"
+                "name,industry,description,city,country,website,email,phone,linkedInUrl,logoUrl,sourceUrl,sourceProvider"
             };
 
             rows.AddRange(companies.Select(c => string.Join(",", new[]
@@ -46,6 +46,7 @@ namespace CareerTrackAI.Services
                 Csv(c.Phone),
                 Csv(c.LinkedInUrl),
                 Csv(c.LogoUrl),
+                Csv(c.SourceUrl),
                 Csv(c.SourceProvider)
             })));
 
@@ -157,7 +158,7 @@ namespace CareerTrackAI.Services
                         Name = companyName,
                         Industry = Get(row, "industry"),
                         City = Get(row, "city"),
-                        Country = Pick(Get(row, "country"), "Saudi Arabia"),
+                        Country = Get(row, "country"),
                         SourceProvider = Pick(Get(row, "sourceProvider"), Get(row, "source")),
                         IsImported = true,
                         ImportedAt = DateTime.UtcNow

@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from 'react'
-import { ArrowRight, Check, Coffee, Eye, EyeOff, KeyRound, Moon, ShieldCheck, Sparkles, Sun } from 'lucide-react'
+import { ArrowRight, Bell, Check, Coffee, Eye, EyeOff, KeyRound, LoaderCircle, Moon, ShieldCheck, Sparkles, Sun } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { careerApi } from '../lib/api.js'
 import { plans } from '../data/plans.js'
+import { useAuth } from '../context/useAuth.js'
 
 function maskKey(value = '') {
   if (!value) return 'No key saved'
@@ -12,12 +13,14 @@ function maskKey(value = '') {
 
 function Settings() {
   const navigate = useNavigate()
+  const { user, refreshProfile } = useAuth()
   const [aiStatus, setAiStatus] = useState(null)
   const [theme, setTheme] = useState(localStorage.getItem('careertrack_theme') || 'System')
   const [preferences, setPreferences] = useState(() => ({
     showDashboardCharts: localStorage.getItem('careertrack_show_dashboard_charts') !== 'false',
     showAiPanels: localStorage.getItem('careertrack_show_ai_panels') !== 'false',
     showCopilot: localStorage.getItem('careertrack_show_copilot') !== 'false',
+    showFloatingAgent: localStorage.getItem('careertrack_show_floating_agent') !== 'false',
     density: localStorage.getItem('careertrack_density') || 'Comfortable',
   }))
   const [apiKey, setApiKey] = useState('')
@@ -25,6 +28,7 @@ function Settings() {
   const [showKey, setShowKey] = useState(false)
   const [selectedPlan, setSelectedPlan] = useState(localStorage.getItem('careertrack_plan') || 'Free AI Credits')
   const [saved, setSaved] = useState(false)
+  const [savingNotifications, setSavingNotifications] = useState(false)
 
   useEffect(() => {
     careerApi.aiStatus().then(setAiStatus).catch(() => null)
@@ -57,11 +61,33 @@ function Settings() {
     localStorage.setItem('careertrack_show_dashboard_charts', String(next.showDashboardCharts))
     localStorage.setItem('careertrack_show_ai_panels', String(next.showAiPanels))
     localStorage.setItem('careertrack_show_copilot', String(next.showCopilot))
+    localStorage.setItem('careertrack_show_floating_agent', String(next.showFloatingAgent))
     if (key === 'showCopilot' && value) localStorage.removeItem('careertrack_copilot_closed')
     localStorage.setItem('careertrack_density', next.density)
     window.dispatchEvent(new Event('careertrack_preferences_changed'))
     setSaved(true)
     setTimeout(() => setSaved(false), 1400)
+  }
+
+  async function updateNotificationPreference(value) {
+    if (!user) return
+    setSavingNotifications(true)
+    try {
+      await careerApi.updateMe({
+        fullName: user.fullName,
+        university: user.university,
+        major: user.major,
+        city: user.city,
+        graduationYear: user.graduationYear,
+        careerObjective: user.careerObjective || '',
+        notificationsEnabled: value,
+      })
+      await refreshProfile()
+      setSaved(true)
+      setTimeout(() => setSaved(false), 1400)
+    } finally {
+      setSavingNotifications(false)
+    }
   }
 
   function choosePlan(plan) {
@@ -227,7 +253,7 @@ function Settings() {
       <section className="card">
         <p className="label">Interface preferences</p>
         <h2 className="mt-1 text-xl font-bold text-slate-950 dark:text-white">Workspace behavior</h2>
-        <div className="mt-5 grid gap-4 lg:grid-cols-2 xl:grid-cols-4">
+        <div className="mt-5 grid gap-4 lg:grid-cols-2 xl:grid-cols-6">
           <label className="flex items-center justify-between gap-4 rounded-lg border border-slate-200 bg-slate-50 p-4 dark:border-slate-800 dark:bg-slate-950">
             <span>
               <span className="block font-bold text-slate-950 dark:text-white">Dashboard charts</span>
@@ -253,14 +279,46 @@ function Settings() {
             </span>
             <input type="checkbox" checked={preferences.showCopilot} onChange={(event) => updatePreference('showCopilot', event.target.checked)} />
           </label>
-          <label>
-            <span className="label">Density</span>
-            <select className="input mt-2" value={preferences.density} onChange={(event) => updatePreference('density', event.target.value)}>
-              <option>Comfortable</option>
-              <option>Compact</option>
-              <option>Spacious</option>
-            </select>
+          <label className="flex items-center justify-between gap-4 rounded-lg border border-slate-200 bg-slate-50 p-4 dark:border-slate-800 dark:bg-slate-950">
+            <span>
+              <span className="block font-bold text-slate-950 dark:text-white">Floating AI Agent</span>
+              <span className="text-sm text-slate-500 dark:text-slate-400">Show the site-wide assistant bubble.</span>
+            </span>
+            <input type="checkbox" checked={preferences.showFloatingAgent} onChange={(event) => updatePreference('showFloatingAgent', event.target.checked)} />
           </label>
+          <label className="flex items-center justify-between gap-4 rounded-lg border border-slate-200 bg-slate-50 p-4 dark:border-slate-800 dark:bg-slate-950">
+            <span>
+              <span className="flex items-center gap-2 font-bold text-slate-950 dark:text-white">
+                <Bell size={16} />
+                Opportunity alerts
+              </span>
+              <span className="text-sm text-slate-500 dark:text-slate-400">Receive admin-shared opportunity notifications.</span>
+            </span>
+            {savingNotifications ? (
+              <LoaderCircle className="animate-spin text-slate-500 dark:text-slate-400" size={18} />
+            ) : (
+              <input type="checkbox" checked={user?.notificationsEnabled !== false} onChange={(event) => updateNotificationPreference(event.target.checked)} />
+            )}
+          </label>
+          <div>
+            <span className="label">Density</span>
+            <div className="mt-2 grid grid-cols-3 rounded-lg border border-slate-200 bg-slate-50 p-1 dark:border-slate-800 dark:bg-slate-950">
+              {['Compact', 'Comfortable', 'Spacious'].map((value) => (
+                <button
+                  key={value}
+                  type="button"
+                  onClick={() => updatePreference('density', value)}
+                  className={`rounded-md px-2 py-2 text-xs font-bold transition ${
+                    preferences.density === value
+                      ? 'bg-slate-950 text-white dark:bg-teal-400 dark:text-slate-950'
+                      : 'text-slate-600 hover:bg-white dark:text-slate-300 dark:hover:bg-slate-900'
+                  }`}
+                >
+                  {value}
+                </button>
+              ))}
+            </div>
+          </div>
         </div>
       </section>
     </div>

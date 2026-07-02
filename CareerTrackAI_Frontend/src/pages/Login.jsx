@@ -1,7 +1,8 @@
 import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { ArrowRight, BrainCircuit, BriefcaseBusiness, Eye, EyeOff, LockKeyhole, Sparkles } from 'lucide-react'
+import { ArrowRight, BriefcaseBusiness, Eye, EyeOff, LockKeyhole, Sparkles } from 'lucide-react'
 import { useAuth } from '../context/useAuth.js'
+import BrandMark from '../components/BrandMark.jsx'
 
 function Login() {
   const navigate = useNavigate()
@@ -25,14 +26,8 @@ function Login() {
     <main className="grid min-h-screen bg-slate-100 text-slate-950 dark:bg-slate-950 dark:text-white lg:grid-cols-[1.05fr_0.95fr]">
       <section className="relative flex min-h-[42rem] flex-col justify-between overflow-hidden bg-slate-950 p-8 text-white lg:min-h-screen lg:p-12">
         <div className="absolute inset-0 bg-[radial-gradient(circle_at_18%_16%,rgba(20,184,166,0.34),transparent_28%),radial-gradient(circle_at_82%_58%,rgba(245,158,11,0.20),transparent_30%)]" />
-        <div className="relative z-10 flex items-center gap-3">
-          <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-white text-slate-950">
-            <BrainCircuit size={25} />
-          </div>
-          <div>
-            <p className="text-xl font-bold">CareerTrack AI</p>
-            <p className="text-sm text-slate-300">AI-powered job search operations</p>
-          </div>
+        <div className="relative z-10">
+          <BrandMark dark />
         </div>
 
         <div className="relative z-10 max-w-2xl py-16">

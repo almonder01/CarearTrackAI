@@ -13,6 +13,7 @@ import Settings from './pages/Settings.jsx'
 import Checkout from './pages/Checkout.jsx'
 import Usage from './pages/Usage.jsx'
 import Help from './pages/Help.jsx'
+import Admin from './pages/Admin.jsx'
 import Login from './pages/Login.jsx'
 import Register from './pages/Register.jsx'
 
@@ -43,6 +44,7 @@ function App() {
         <Route path="data-hub" element={<DataHub />} />
         <Route path="profile" element={<Profile />} />
         <Route path="settings" element={<Settings />} />
+        <Route path="admin" element={<Admin />} />
         <Route path="help" element={<Help />} />
         <Route path="checkout/:planId" element={<Checkout />} />
         <Route path="usage" element={<Usage />} />

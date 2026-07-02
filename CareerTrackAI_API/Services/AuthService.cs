@@ -31,18 +31,36 @@ namespace CareerTrackAI.Services
 
         public async Task<AuthResponse?> RegisterAsync(RegisterRequest request)
         {
-            var exists = await _db.Users.AnyAsync(u => u.Email == request.Email.ToLower());
-            if (exists) return null;
+            var email = request.Email.Trim().ToLower();
+            var existing = await _db.Users.IgnoreQueryFilters().FirstOrDefaultAsync(u => u.Email == email);
+            if (existing != null && !existing.IsDeleted) return null;
+            if (existing != null)
+            {
+                existing.FullName = request.FullName.Trim();
+                existing.PasswordHash = BCrypt.Net.BCrypt.HashPassword(request.Password);
+                existing.Role = Enums.UserRole.Student;
+                existing.University = request.University;
+                existing.Major = request.Major;
+                existing.City = request.City;
+                existing.GraduationYear = request.GraduationYear;
+                existing.CareerObjective = request.CareerObjective;
+                existing.IsDeleted = false;
+                existing.DeletedAt = null;
+                existing.UpdatedAt = DateTime.UtcNow;
+                await _db.SaveChangesAsync();
+                return await GenerateAuthResponse(existing);
+            }
 
             var user = new User
             {
-                FullName = request.FullName,
-                Email = request.Email.ToLower(),
+                FullName = request.FullName.Trim(),
+                Email = email,
                 PasswordHash = BCrypt.Net.BCrypt.HashPassword(request.Password),
                 University = request.University,
                 Major = request.Major,
                 City = request.City,
-                GraduationYear = request.GraduationYear
+                GraduationYear = request.GraduationYear,
+                CareerObjective = request.CareerObjective
             };
 
             _db.Users.Add(user);
@@ -112,7 +130,9 @@ namespace CareerTrackAI.Services
                     Id = user.Id,
                     FullName = user.FullName,
                     Email = user.Email,
-                    Role = user.Role.ToString()
+                    Role = user.Role.ToString(),
+                    NotificationsEnabled = user.NotificationsEnabled,
+                    CareerObjective = user.CareerObjective
                 }
             };
         }

@@ -14,13 +14,16 @@ namespace CareerTrackAI.DTOs.Auth
         public string Email { get; set; } = string.Empty;
 
         [Required]
-        [MinLength(8)]
+        [MinLength(8, ErrorMessage = "Password must be at least 8 characters.")]
+        [RegularExpression(@"^(?=.*[A-Za-z])(?=.*\d).+$", ErrorMessage = "Password must include at least one letter and one number.")]
         public string Password { get; set; } = string.Empty;
 
         public string? University { get; set; }
         public string? Major { get; set; }
         public string? City { get; set; }
         public int? GraduationYear { get; set; }
+        [MaxLength(1000)]
+        public string? CareerObjective { get; set; }
     }
 
     public class LoginRequest
@@ -56,5 +59,7 @@ namespace CareerTrackAI.DTOs.Auth
         public string FullName { get; set; } = string.Empty;
         public string Email { get; set; } = string.Empty;
         public string Role { get; set; } = string.Empty;
+        public bool NotificationsEnabled { get; set; }
+        public string? CareerObjective { get; set; }
     }
 }

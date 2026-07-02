@@ -3,6 +3,7 @@ import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { Bot, LoaderCircle, RefreshCw, Sparkles, Trash2, Wand2 } from 'lucide-react'
 import { careerApi } from '../lib/api.js'
+import { readScopedText, removeScopedStorage, writeScopedText } from '../lib/userStorage.js'
 
 function storageKeyForPanel(title) {
   return `careertrack_ai_panel_${String(title || 'panel')
@@ -12,11 +13,7 @@ function storageKeyForPanel(title) {
 }
 
 function readStoredPanelContent(key) {
-  try {
-    return localStorage.getItem(key) || ''
-  } catch {
-    return ''
-  }
+  return readScopedText(key, '')
 }
 
 function MarkdownBlock({ value }) {
@@ -72,11 +69,11 @@ function AiActionPanel({ title = 'AI next move', prompt = '', children, actions 
       })
       const nextContent = response.reply || 'No AI insight returned.'
       setContent(nextContent)
-      localStorage.setItem(storageKey, nextContent)
+      writeScopedText(storageKey, nextContent)
     } catch (error) {
       const nextContent = error.message || 'Could not refresh this AI insight.'
       setContent(nextContent)
-      localStorage.setItem(storageKey, nextContent)
+      writeScopedText(storageKey, nextContent)
     } finally {
       setLoading(false)
     }
@@ -84,7 +81,7 @@ function AiActionPanel({ title = 'AI next move', prompt = '', children, actions 
 
   function clearInsight() {
     setContent('')
-    localStorage.removeItem(storageKey)
+    removeScopedStorage(storageKey)
   }
 
   return (

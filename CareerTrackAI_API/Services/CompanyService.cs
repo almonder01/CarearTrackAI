@@ -9,7 +9,7 @@ namespace CareerTrackAI.Services
     {
         Task<List<CompanyResponse>> GetAllAsync(int userId, string? industry, string? city, string? country, bool includeShared);
         Task<CompanyResponse?> GetByIdAsync(int id, int userId, bool includeShared = false);
-        Task<CompanyResponse> CreateAsync(int userId, CreateCompanyRequest request);
+        Task<CompanyResponse> CreateAsync(int? userId, CreateCompanyRequest request);
         Task<SaveSharedCompanyResponse?> SaveSharedAsync(int id, int userId);
         Task<CompanyResponse?> UpdateAsync(int id, int userId, UpdateCompanyRequest request);
         Task<bool> DeleteAsync(int id, int userId);
@@ -40,6 +40,17 @@ namespace CareerTrackAI.Services
                 query = query.Where(c => c.Country != null && c.Country.Contains(country));
 
             var companies = await query.OrderBy(c => c.Name).ToListAsync();
+            if (includeShared)
+            {
+                var personalNames = companies
+                    .Where(company => company.UserId == userId)
+                    .Select(company => company.Name)
+                    .ToHashSet(StringComparer.OrdinalIgnoreCase);
+                companies = companies
+                    .Where(company => company.UserId == userId || !personalNames.Contains(company.Name))
+                    .ToList();
+            }
+
             return companies.Select(MapToResponse).ToList();
         }
 
@@ -49,7 +60,7 @@ namespace CareerTrackAI.Services
             return company == null ? null : MapToResponse(company);
         }
 
-        public async Task<CompanyResponse> CreateAsync(int userId, CreateCompanyRequest request)
+        public async Task<CompanyResponse> CreateAsync(int? userId, CreateCompanyRequest request)
         {
             var company = new Company
             {
@@ -64,6 +75,7 @@ namespace CareerTrackAI.Services
                 Phone = request.Phone,
                 LinkedInUrl = request.LinkedInUrl,
                 LogoUrl = request.LogoUrl,
+                SourceUrl = request.SourceUrl,
                 SourceProvider = request.SourceProvider
             };
 
@@ -167,6 +179,7 @@ namespace CareerTrackAI.Services
             if (request.Phone != null) company.Phone = request.Phone;
             if (request.LinkedInUrl != null) company.LinkedInUrl = request.LinkedInUrl;
             if (request.LogoUrl != null) company.LogoUrl = request.LogoUrl;
+            if (request.SourceUrl != null) company.SourceUrl = request.SourceUrl;
             if (request.SourceProvider != null) company.SourceProvider = request.SourceProvider;
 
             company.UpdatedAt = DateTime.UtcNow;
@@ -176,11 +189,49 @@ namespace CareerTrackAI.Services
 
         public async Task<bool> DeleteAsync(int id, int userId)
         {
-            var company = await _db.Companies.FirstOrDefaultAsync(c => c.Id == id && c.UserId == userId);
+            var company = await _db.Companies
+                .Include(c => c.JobOpportunities.Where(j => j.UserId == userId))
+                .FirstOrDefaultAsync(c => c.Id == id && c.UserId == userId);
             if (company == null) return false;
 
+            var now = DateTime.UtcNow;
+            var jobIds = company.JobOpportunities.Select(job => job.Id).ToList();
+            var applications = jobIds.Count == 0
+                ? new List<Application>()
+                : await _db.Applications
+                    .Where(application => application.UserId == userId && jobIds.Contains(application.JobOpportunityId))
+                    .ToListAsync();
+            var applicationIds = applications.Select(application => application.Id).ToList();
+            var interviews = applicationIds.Count == 0
+                ? new List<Interview>()
+                : await _db.Interviews
+                    .Where(interview => applicationIds.Contains(interview.ApplicationId))
+                    .ToListAsync();
+
+            foreach (var interview in interviews)
+            {
+                interview.IsDeleted = true;
+                interview.DeletedAt = now;
+                interview.UpdatedAt = now;
+            }
+
+            foreach (var application in applications)
+            {
+                application.IsDeleted = true;
+                application.DeletedAt = now;
+                application.UpdatedAt = now;
+            }
+
+            foreach (var job in company.JobOpportunities)
+            {
+                job.IsDeleted = true;
+                job.DeletedAt = now;
+                job.UpdatedAt = now;
+            }
+
             company.IsDeleted = true;
-            company.DeletedAt = DateTime.UtcNow;
+            company.DeletedAt = now;
+            company.UpdatedAt = now;
             await _db.SaveChangesAsync();
             return true;
         }
@@ -199,6 +250,7 @@ namespace CareerTrackAI.Services
             Phone = c.Phone,
             LinkedInUrl = c.LinkedInUrl,
             LogoUrl = c.LogoUrl,
+            SourceUrl = c.SourceUrl,
             SourceProvider = c.SourceProvider,
             IsShared = c.UserId == null,
             IsImported = c.IsImported,

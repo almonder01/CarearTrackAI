@@ -31,7 +31,7 @@ namespace CareerTrackAI.Models
     /// </summary>
     public class ResumeVersion : BaseEntity
     {
-        public string VersionName { get; set; } = string.Empty;  // "CV for STC - Jun 2025"
+        public string VersionName { get; set; } = string.Empty;
         public string FileUrl { get; set; } = string.Empty;
         public string? FileType { get; set; }
         public bool IsAiGenerated { get; set; } = true;

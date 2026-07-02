@@ -15,6 +15,8 @@ namespace CareerTrackAI.DTOs.User
         public string? Major { get; set; }
         public string? City { get; set; }
         public int? GraduationYear { get; set; }
+        public string? CareerObjective { get; set; }
+        public bool NotificationsEnabled { get; set; }
         public DateTime? LastLoginAt { get; set; }
         public DateTime CreatedAt { get; set; }
     }
@@ -40,5 +42,10 @@ namespace CareerTrackAI.DTOs.User
 
         [Range(2000, 2100)]
         public int? GraduationYear { get; set; }
+
+        [MaxLength(1000)]
+        public string? CareerObjective { get; set; }
+
+        public bool? NotificationsEnabled { get; set; }
     }
 }

@@ -2,15 +2,12 @@ import { useEffect, useRef, useState } from 'react'
 import { Bot, FileUp, LoaderCircle, Sparkles, Trash2, X } from 'lucide-react'
 import dayjs from 'dayjs'
 import { careerApi } from '../lib/api.js'
+import { readScopedJson, writeScopedJson } from '../lib/userStorage.js'
 
 const RESUME_ANALYSIS_STORAGE_KEY = 'careertrack_resume_analysis'
 
 function readStoredResumeAnalysis() {
-  try {
-    return JSON.parse(localStorage.getItem(RESUME_ANALYSIS_STORAGE_KEY) || '{}')
-  } catch {
-    return {}
-  }
+  return readScopedJson(RESUME_ANALYSIS_STORAGE_KEY, {})
 }
 
 function Resumes() {
@@ -23,15 +20,21 @@ function Resumes() {
   const [uploading, setUploading] = useState(false)
   const [uploadMessage, setUploadMessage] = useState('')
   const [uploadError, setUploadError] = useState('')
+  const [loadError, setLoadError] = useState('')
+  const [loading, setLoading] = useState(true)
   const [deletingIds, setDeletingIds] = useState([])
   const fileInputRef = useRef(null)
 
   useEffect(() => {
-    careerApi.resumes().then(setResumes)
+    careerApi
+      .resumes()
+      .then(setResumes)
+      .catch((error) => setLoadError(error.message || 'Could not load resumes.'))
+      .finally(() => setLoading(false))
   }, [])
 
   useEffect(() => {
-    localStorage.setItem(RESUME_ANALYSIS_STORAGE_KEY, JSON.stringify(analysisByResume))
+    writeScopedJson(RESUME_ANALYSIS_STORAGE_KEY, analysisByResume)
   }, [analysisByResume])
 
   async function upload(event) {
@@ -108,6 +111,14 @@ function Resumes() {
     })
   }
 
+  function scoreBreakdownMax(label) {
+    const lower = String(label).toLowerCase()
+    if (lower.includes('role') || lower.includes('skill') || lower.includes('project')) return 20
+    if (lower.includes('ats') || lower.includes('experience')) return 15
+    if (lower.includes('polish')) return 10
+    return 100
+  }
+
   return (
     <div className="grid gap-6 xl:grid-cols-[360px_1fr]">
       <section className="card h-fit">
@@ -147,7 +158,9 @@ function Resumes() {
       </section>
 
       <section className="space-y-4">
-        {resumes.length === 0 && (
+        {loading && <div className="card text-sm font-semibold text-slate-500 dark:text-slate-400">Loading resumes...</div>}
+        {loadError && <div className="rounded-lg border border-rose-200 bg-rose-50 p-3 text-sm font-semibold text-rose-700 dark:border-rose-800 dark:bg-rose-950/40 dark:text-rose-200">{loadError}</div>}
+        {!loading && !loadError && resumes.length === 0 && (
           <div className="card text-sm font-semibold text-slate-500 dark:text-slate-400">
             No resumes yet. Upload a PDF or DOCX to start AI analysis.
           </div>
@@ -193,6 +206,30 @@ function Resumes() {
                     </button>
                   </div>
                 </div>
+                {analysisByResume[resume.id].scoreBreakdown && (
+                  <div className="mb-4 rounded-lg bg-white/80 p-4 dark:bg-slate-900/80">
+                    <p className="font-bold text-slate-950 dark:text-white">Employer-style score breakdown</p>
+                    <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                      {Object.entries(analysisByResume[resume.id].scoreBreakdown).map(([label, value]) => (
+                        <div key={label} className="rounded-lg border border-slate-200 bg-slate-50 p-3 dark:border-slate-800 dark:bg-slate-950">
+                          <div className="mb-2 flex items-center justify-between gap-3 text-sm">
+                            <span className="font-semibold text-slate-700 dark:text-slate-200">{label}</span>
+                            <span className="font-bold text-teal-700 dark:text-teal-300">{value}/{scoreBreakdownMax(label)}</span>
+                          </div>
+                          <div className="h-2 rounded-full bg-slate-200 dark:bg-slate-800">
+                            <div
+                              className="h-2 rounded-full bg-teal-600 dark:bg-teal-400"
+                              style={{ width: `${Math.min(100, Math.max(0, ((Number(value) || 0) / scoreBreakdownMax(label)) * 100))}%` }}
+                            />
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                    <p className="mt-3 text-xs leading-5 text-slate-500 dark:text-slate-400">
+                      The rubric weighs role alignment, skills evidence, project impact, ATS clarity, experience structure, and polish.
+                    </p>
+                  </div>
+                )}
                 <div className="grid gap-4 md:grid-cols-2">
                   {[
                     ['Strengths', analysisByResume[resume.id].strengths],

@@ -61,9 +61,13 @@ namespace CareerTrackAI.Controllers
                 return CreatedAtAction(nameof(GetById), new { id = result.Id },
                     ApiResponse<ApplicationResponse>.Ok(result, "Application created"));
             }
-            catch (InvalidOperationException ex)
+            catch (InvalidOperationException ex) when (ex.Message.Contains("Opportunity", StringComparison.OrdinalIgnoreCase))
             {
                 return NotFound(ApiResponse<object>.NotFound(ex.Message));
+            }
+            catch (InvalidOperationException ex)
+            {
+                return BadRequest(ApiResponse<object>.Fail(ex.Message));
             }
             catch (Exception)
             {
@@ -90,7 +94,15 @@ namespace CareerTrackAI.Controllers
         public async Task<IActionResult> Update(int id, [FromBody] UpdateApplicationRequest request)
         {
             var userId = GetUserId();
-            var result = await _applicationService.UpdateAsync(id, userId, request);
+            ApplicationResponse? result;
+            try
+            {
+                result = await _applicationService.UpdateAsync(id, userId, request);
+            }
+            catch (InvalidOperationException ex)
+            {
+                return BadRequest(ApiResponse<object>.Fail(ex.Message));
+            }
 
             if (result == null)
                 return NotFound(ApiResponse<object>.NotFound("Application not found"));

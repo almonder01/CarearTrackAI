@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { AlertTriangle, Building2, CheckCircle2, CloudDownload, DatabaseZap, Download, ExternalLink, LoaderCircle, MapPin, ShieldCheck, SlidersHorizontal, Trash2, X } from 'lucide-react'
 import dayjs from 'dayjs'
-import { careerApi } from '../lib/api.js'
+import { careerApi, friendlyUserMessage } from '../lib/api.js'
 import AiActionPanel from '../components/AiActionPanel.jsx'
 
 function Opportunities() {
@@ -14,17 +14,27 @@ function Opportunities() {
   const [linkChecks, setLinkChecks] = useState({})
   const [checkingLinks, setCheckingLinks] = useState([])
   const [actionMessage, setActionMessage] = useState('')
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
   const [showDeleteAllDialog, setShowDeleteAllDialog] = useState(false)
   const [deletingAll, setDeletingAll] = useState(false)
   const [exportingCsv, setExportingCsv] = useState(false)
 
   const refreshData = useCallback(async () => {
-    const [opportunities, applications] = await Promise.all([
-      careerApi.opportunities({ ...filters, includeShared }),
-      careerApi.applications().catch(() => []),
-    ])
-    setItems(opportunities)
-    setTrackedIds(applications.map((item) => item.jobOpportunity.id))
+    setLoading(true)
+    setError('')
+    try {
+      const [opportunities, applications] = await Promise.all([
+        careerApi.opportunities({ ...filters, includeShared }),
+        careerApi.applications().catch(() => []),
+      ])
+      setItems(opportunities)
+      setTrackedIds(applications.map((item) => item.jobOpportunity.id))
+    } catch (err) {
+      setError(err.message || 'Could not load opportunities.')
+    } finally {
+      setLoading(false)
+    }
   }, [filters, includeShared])
 
   useEffect(() => {
@@ -46,8 +56,9 @@ function Opportunities() {
 
   function sourceOf(item) {
     const source = sourceText(item)
-    if (source.includes('adzuna')) return 'Adzuna'
-    if (source.includes('jobdatalake') || source.includes('job data lake')) return 'JobDataLake'
+    const provider = String(item.sourceProvider || item.company?.sourceProvider || '').toLowerCase()
+    if (provider === 'adzuna' || source.includes('adzuna')) return 'Adzuna'
+    if (provider === 'jobdatalake' || source.includes('jobdatalake') || source.includes('job data lake')) return 'JobDataLake'
     if (source.includes('linkedin')) return 'LinkedIn Scout'
     if (source.includes('google')) return 'Google Search'
     return item.isImported ? 'Imported' : 'Manual'
@@ -194,23 +205,46 @@ function Opportunities() {
     const hasExistingUrl = Boolean(url)
     setCheckingLinks((ids) => [...new Set([...ids, item.id])])
     try {
-      const status = await careerApi.aiStatus().catch(() => null)
-      if (status && !status.configured) {
+      if (hasExistingUrl) {
+        const result = await careerApi.verifyOpportunityLink({
+          url,
+          title: item.title,
+          companyName: item.company?.name,
+        })
+        const finalUrl = normalizeUrl(result.finalUrl)
+        const alternativeUrl = finalUrl && !sameUrl(finalUrl, url) ? finalUrl : ''
+        const status =
+          result.status === 'Verified'
+            ? 'Verified: this link is reachable and looks like an application or careers page.'
+            : result.status === 'Reachable'
+              ? 'Reachable: the link opens, but it may be a general company page.'
+              : friendlyUserMessage(result.message, 'This link could not be verified right now. Open it manually before applying.')
+
         setLinkChecks((checks) => ({
           ...checks,
-          [item.id]: { status: 'AI link checking is unavailable because Gemini is not configured.' },
+          [item.id]: {
+            status,
+            alternativeUrl,
+            isProblem: !result.isReachable,
+          },
         }))
-        setActionMessage('AI link checking is unavailable because Gemini is not configured.')
+        setActionMessage(status)
         return
       }
 
+      const status = await careerApi.aiStatus().catch(() => null)
+      if (status && !status.configured) {
+        const message = 'AI link search is unavailable because Gemini is not configured. Add a posting URL manually or open the company website.'
+        setLinkChecks((checks) => ({
+          ...checks,
+          [item.id]: { status: message, isProblem: true },
+        }))
+        setActionMessage(message)
+        return
+      }
       const response = await careerApi.aiChat({
         message:
-          (hasExistingUrl
-            ? `Check this job posting URL for usefulness. Return exactly OK if it looks like a usable job/company application link. If it looks missing, expired, or too generic, return only one better URL if you can infer one. If you cannot verify it, return exactly UNAVAILABLE. No explanation.`
-            : `Find the most likely official application or careers URL for this role. Return only one URL if you can infer a reliable one. If you cannot, return exactly NO_LINK.`) +
-          `\n\n` +
-          `Role: ${item.title}\nCompany: ${item.company?.name}\nURL: ${url}`,
+          `Find the most likely official application or careers URL for this role. Return only one URL if you can infer a reliable one. If you cannot, return exactly NO_LINK. No explanation.\n\nRole: ${item.title}\nCompany: ${item.company?.name}`,
         history: [],
       })
       const text = response.reply?.trim() || ''
@@ -220,16 +254,11 @@ function Opportunities() {
 
       let result
       if (normalizedSuggestion) {
-        result =
-          hasExistingUrl && sameUrl(normalizedSuggestion, url)
-            ? { status: 'Link looks usable' }
-            : { status: hasExistingUrl ? 'Alternative found' : 'Link found', alternativeUrl: normalizedSuggestion }
-      } else if (exact === 'OK') {
-        result = { status: 'Link looks usable' }
+        result = { status: 'Link found', alternativeUrl: normalizedSuggestion }
       } else if (exact === 'NO_LINK') {
         result = { status: 'AI could not find a reliable link' }
       } else {
-        result = { status: 'AI link checking is unavailable or could not verify this link right now.' }
+        result = { status: 'AI link search is unavailable or could not find a reliable link right now.', isProblem: true }
       }
 
       setLinkChecks((checks) => ({
@@ -238,11 +267,15 @@ function Opportunities() {
       }))
       setActionMessage(result.status)
     } catch (error) {
+      const message = friendlyUserMessage(error.message, 'Link checking is unavailable right now. You can still open the posting manually.')
       setLinkChecks((checks) => ({
         ...checks,
-        [item.id]: { status: error.message || 'AI link checking is unavailable right now. You can still open the posting manually.' },
+        [item.id]: {
+          status: message,
+          isProblem: true,
+        },
       }))
-      setActionMessage(error.message || `Could not check "${item.title}" with AI right now.`)
+      setActionMessage(message)
     } finally {
       setCheckingLinks((ids) => ids.filter((id) => id !== item.id))
     }
@@ -311,10 +344,21 @@ function Opportunities() {
             {actionMessage}
           </div>
         )}
+        {loading && <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm font-semibold text-slate-500 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-400">Loading opportunities...</div>}
+        {error && <div className="mt-4 rounded-lg border border-rose-200 bg-rose-50 p-3 text-sm font-semibold text-rose-700 dark:border-rose-800 dark:bg-rose-950/40 dark:text-rose-200">{error}</div>}
       </section>
 
       <div className="grid gap-6 xl:grid-cols-[1fr_320px]">
         <section className="grid gap-4 md:grid-cols-2">
+          {!loading && !error && visibleItems.length === 0 && (
+            <div className="card md:col-span-2">
+              <p className="label">No opportunities</p>
+              <h3 className="mt-1 text-lg font-bold text-slate-950 dark:text-white">Your opportunity list is empty</h3>
+              <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
+                Import real rows from Data Hub, save companies from the shared database, or search external sources.
+              </p>
+            </div>
+          )}
           {visibleItems.map((item) => (
             <article key={item.id} className="card overflow-hidden">
               <div className="mb-4 flex items-start justify-between gap-4">
@@ -382,7 +426,7 @@ function Opportunities() {
                 </button>
                 <button type="button" onClick={() => verifyJobLink(item)} disabled={checkingLinks.includes(item.id)} className="btn-secondary">
                   {checkingLinks.includes(item.id) ? <LoaderCircle className="animate-spin" size={17} /> : <ShieldCheck size={17} />}
-                  {checkingLinks.includes(item.id) ? 'Checking link...' : primaryUrl(item) ? 'AI verify link' : 'AI find link'}
+                  {checkingLinks.includes(item.id) ? 'Checking link...' : primaryUrl(item) ? 'Verify link' : 'AI find link'}
                 </button>
                 <button type="button" onClick={() => deleteOpportunity(item)} disabled={item.isShared} className="btn-secondary disabled:cursor-not-allowed disabled:opacity-45">
                   <Trash2 size={17} />
@@ -399,7 +443,9 @@ function Opportunities() {
                 </div>
               )}
               {linkChecks[item.id]?.status && !linkChecks[item.id]?.alternativeUrl && (
-                <p className="mt-3 text-sm font-semibold text-emerald-700 dark:text-emerald-300">{linkChecks[item.id].status}</p>
+                <p className={`mt-3 text-sm font-semibold ${linkChecks[item.id]?.isProblem ? 'text-amber-700 dark:text-amber-300' : 'text-emerald-700 dark:text-emerald-300'}`}>
+                  {linkChecks[item.id].status}
+                </p>
               )}
             </article>
           ))}

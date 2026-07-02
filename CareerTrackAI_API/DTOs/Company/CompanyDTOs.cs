@@ -16,6 +16,7 @@ namespace CareerTrackAI.DTOs.Company
         public string? Phone { get; set; }
         public string? LinkedInUrl { get; set; }
         public string? LogoUrl { get; set; }
+        public string? SourceUrl { get; set; }
         public string? SourceProvider { get; set; }
         public bool IsShared { get; set; }
         public bool IsImported { get; set; }
@@ -35,6 +36,7 @@ namespace CareerTrackAI.DTOs.Company
         public string? Country { get; set; }
         public string? Website { get; set; }
         public string? LogoUrl { get; set; }
+        public string? SourceUrl { get; set; }
         public string? SourceProvider { get; set; }
         public bool IsShared { get; set; }
     }
@@ -76,6 +78,9 @@ namespace CareerTrackAI.DTOs.Company
         [MaxLength(500)]
         public string? LogoUrl { get; set; }
 
+        [MaxLength(500)]
+        public string? SourceUrl { get; set; }
+
         [MaxLength(100)]
         public string? SourceProvider { get; set; }
     }
@@ -115,6 +120,9 @@ namespace CareerTrackAI.DTOs.Company
 
         [MaxLength(500)]
         public string? LogoUrl { get; set; }
+
+        [MaxLength(500)]
+        public string? SourceUrl { get; set; }
 
         [MaxLength(100)]
         public string? SourceProvider { get; set; }

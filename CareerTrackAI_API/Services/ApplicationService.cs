@@ -64,6 +64,8 @@ namespace CareerTrackAI.Services
             if (job == null)
                 throw new InvalidOperationException("Opportunity is not available in this workspace.");
 
+            await EnsureResumeSelectionBelongsToUserAsync(userId, request.ResumeId, request.ResumeVersionId);
+
             var application = new Application
             {
                 UserId = userId,
@@ -107,6 +109,8 @@ namespace CareerTrackAI.Services
 
             if (application == null) return null;
 
+            await EnsureResumeSelectionBelongsToUserAsync(userId, request.ResumeId, request.ResumeVersionId);
+
             if (request.Notes != null) application.Notes = request.Notes;
             if (request.AppliedAt.HasValue) application.AppliedAt = request.AppliedAt;
             if (request.ResumeId.HasValue) application.ResumeId = request.ResumeId;
@@ -124,6 +128,23 @@ namespace CareerTrackAI.Services
             return await GetByIdAsync(id, userId);
         }
 
+        private async Task EnsureResumeSelectionBelongsToUserAsync(int userId, int? resumeId, int? resumeVersionId)
+        {
+            if (resumeId.HasValue)
+            {
+                var ownsResume = await _db.Resumes.AnyAsync(resume => resume.Id == resumeId.Value && resume.UserId == userId);
+                if (!ownsResume) throw new InvalidOperationException("Selected resume is not available in this workspace.");
+            }
+
+            if (resumeVersionId.HasValue)
+            {
+                var ownsVersion = await _db.ResumeVersions
+                    .Include(version => version.Resume)
+                    .AnyAsync(version => version.Id == resumeVersionId.Value && version.Resume.UserId == userId);
+                if (!ownsVersion) throw new InvalidOperationException("Selected resume version is not available in this workspace.");
+            }
+        }
+
         public async Task<bool> DeleteAsync(int id, int userId)
         {
             var application = await _db.Applications
@@ -131,9 +152,21 @@ namespace CareerTrackAI.Services
 
             if (application == null) return false;
 
-            // Soft Delete
+            var now = DateTime.UtcNow;
+            var interviews = await _db.Interviews
+                .Where(i => i.ApplicationId == application.Id)
+                .ToListAsync();
+
+            foreach (var interview in interviews)
+            {
+                interview.IsDeleted = true;
+                interview.DeletedAt = now;
+                interview.UpdatedAt = now;
+            }
+
             application.IsDeleted = true;
-            application.DeletedAt = DateTime.UtcNow;
+            application.DeletedAt = now;
+            application.UpdatedAt = now;
             await _db.SaveChangesAsync();
             return true;
         }

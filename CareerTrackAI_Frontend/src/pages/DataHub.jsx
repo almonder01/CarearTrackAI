@@ -16,11 +16,13 @@ import {
   Sparkles,
   Trash2,
   Wand2,
+  X,
 } from 'lucide-react'
 import { careerApi, friendlyUserMessage } from '../lib/api.js'
+import { readScopedJson, writeScopedJson } from '../lib/userStorage.js'
 
-const companyHeaders = ['name', 'industry', 'city', 'country', 'website', 'email', 'phone', 'linkedInUrl', 'notes', 'sourceProvider']
-const visibleCompanyFields = ['name', 'industry', 'city', 'country', 'website', 'email', 'sourceProvider']
+const companyHeaders = ['name', 'industry', 'description', 'city', 'country', 'website', 'email', 'phone', 'linkedInUrl', 'logoUrl', 'sourceUrl', 'sourceProvider']
+const visibleCompanyFields = companyHeaders
 const opportunityHeaders = [
   'title',
   'companyName',
@@ -29,6 +31,8 @@ const opportunityHeaders = [
   'description',
   'location',
   'isRemote',
+  'salaryMin',
+  'salaryMax',
   'applicationDeadline',
   'requiredSkills',
   'jobUrl',
@@ -37,7 +41,7 @@ const opportunityHeaders = [
 ]
 
 const tabs = [
-  ['companies', 'Companies', Building2],
+  ['companies', 'Database', Building2],
   ['resumes', 'CVs', FileText],
   ['manual', 'Manual CSV', FileUp],
   ['adzuna', 'Adzuna', CloudDownload],
@@ -45,14 +49,12 @@ const tabs = [
   ['ai', 'AI Sourcing', Bot],
 ]
 
-const DATA_HUB_PREVIEW_STORAGE_KEY = 'careertrack_data_hub_preview'
+const visibleOpportunityFields = ['title', 'companyName', 'type', 'employmentType', 'location', 'jobUrl', 'sourceProvider']
+
+const DATA_HUB_PREVIEW_STORAGE_KEY = 'careertrack_data_hub_preview_v2'
 
 function readStoredDataHubPreview() {
-  try {
-    return JSON.parse(localStorage.getItem(DATA_HUB_PREVIEW_STORAGE_KEY) || '{}')
-  } catch {
-    return {}
-  }
+  return readScopedJson(DATA_HUB_PREVIEW_STORAGE_KEY, {})
 }
 
 function escapeCsv(value = '') {
@@ -128,6 +130,8 @@ function opportunityToRow(item) {
     description: item.description || '',
     location: item.location || item.company?.city || '',
     isRemote: String(Boolean(item.isRemote)),
+    salaryMin: item.salaryMin || '',
+    salaryMax: item.salaryMax || '',
     applicationDeadline: item.applicationDeadline || '',
     requiredSkills: item.requiredSkills || '',
     jobUrl: item.jobUrl || '',
@@ -136,7 +140,173 @@ function opportunityToRow(item) {
   }
 }
 
-function PreviewPanel({ rows, dataset, source, importResult, operationMessage, importing, onRowChange, onRemove, onClear, onImport, onDownload }) {
+function companyToRow(item) {
+  return {
+    name: item.name || '',
+    industry: item.industry || '',
+    description: item.description || '',
+    city: item.city || '',
+    country: item.country || '',
+    website: item.website || '',
+    email: item.email || '',
+    phone: item.phone || '',
+    linkedInUrl: item.linkedInUrl || '',
+    logoUrl: item.logoUrl || '',
+    sourceUrl: item.sourceUrl || '',
+    sourceProvider: item.sourceProvider || '',
+  }
+}
+
+function normalizeKey(value = '') {
+  return value.trim().replace(/\s+/g, '').toLowerCase()
+}
+
+function normalizeSearchText(value = '') {
+  return String(value || '').toLowerCase().trim()
+}
+
+function matchesText(value, term) {
+  return normalizeSearchText(value).includes(term)
+}
+
+function uniqueValues(items, selector) {
+  return [...new Set(items.map(selector).filter(Boolean))].sort((a, b) => String(a).localeCompare(String(b)))
+}
+
+function getRowValue(row, ...keys) {
+  const entries = Object.entries(row || {}).reduce((acc, [key, value]) => {
+    acc[normalizeKey(key)] = value
+    return acc
+  }, {})
+
+  for (const key of keys) {
+    const value = entries[normalizeKey(key)]
+    if (value !== undefined && String(value).trim() !== '') return value
+  }
+  return ''
+}
+
+function normalizeRowForDataset(row, dataset) {
+  if (dataset === 'companies') {
+    return {
+      name: getRowValue(row, 'name', 'companyName', 'company'),
+      industry: getRowValue(row, 'industry', 'sector'),
+      description: getRowValue(row, 'description', 'notes'),
+      city: getRowValue(row, 'city', 'location'),
+      country: getRowValue(row, 'country'),
+      website: getRowValue(row, 'website', 'url'),
+      email: getRowValue(row, 'email'),
+      phone: getRowValue(row, 'phone'),
+      linkedInUrl: getRowValue(row, 'linkedInUrl', 'linkedinurl', 'linkedin'),
+      logoUrl: getRowValue(row, 'logoUrl', 'logourl'),
+      sourceUrl: getRowValue(row, 'sourceUrl', 'sourceurl'),
+      sourceProvider: getRowValue(row, 'sourceProvider', 'source'),
+    }
+  }
+
+  return {
+    title: getRowValue(row, 'title', 'role', 'position'),
+    companyName: getRowValue(row, 'companyName', 'company', 'name'),
+    type: getRowValue(row, 'type'),
+    employmentType: getRowValue(row, 'employmentType', 'employment'),
+    description: getRowValue(row, 'description', 'notes'),
+    location: getRowValue(row, 'location', 'city'),
+    isRemote: getRowValue(row, 'isRemote', 'remote'),
+    salaryMin: getRowValue(row, 'salaryMin', 'minimumSalary', 'minSalary'),
+    salaryMax: getRowValue(row, 'salaryMax', 'maximumSalary', 'maxSalary'),
+    applicationDeadline: getRowValue(row, 'applicationDeadline', 'deadline'),
+    requiredSkills: getRowValue(row, 'requiredSkills', 'skills'),
+    jobUrl: getRowValue(row, 'jobUrl', 'url', 'applyUrl', 'applicationUrl'),
+    sourceUrl: getRowValue(row, 'sourceUrl', 'sourceurl'),
+    sourceProvider: getRowValue(row, 'sourceProvider', 'source'),
+  }
+}
+
+function buildFallbackFilledRow(row, dataset) {
+  const normalized = normalizeRowForDataset(row, dataset)
+  if (dataset === 'companies') {
+    return {
+      ...normalized,
+      industry: normalized.industry || guessIndustry(normalized.name, normalized.website),
+      description: normalized.description || `Lead for ${normalized.name || 'this company'}. Verify details before importing.`,
+      sourceProvider: normalized.sourceProvider || 'Manual CSV',
+    }
+  }
+
+  return {
+    ...normalized,
+    type: normalized.type || 'Internship',
+    employmentType: normalized.employmentType || 'FullTime',
+    isRemote: normalized.isRemote || 'false',
+    requiredSkills: normalized.requiredSkills || 'Communication, Problem Solving',
+    description: normalized.description || `Opportunity draft for ${normalized.title || 'this role'}. Verify details before importing.`,
+    sourceProvider: normalized.sourceProvider || 'Manual CSV',
+  }
+}
+
+function parseAiFilledRows(reply = '') {
+  const cleaned = reply.replace(/```json/gi, '').replace(/```/g, '').trim()
+  const candidates = [cleaned]
+  const arrayStart = cleaned.indexOf('[')
+  const arrayEnd = cleaned.lastIndexOf(']')
+  if (arrayStart >= 0 && arrayEnd > arrayStart) candidates.push(cleaned.slice(arrayStart, arrayEnd + 1))
+  const objectStart = cleaned.indexOf('{')
+  const objectEnd = cleaned.lastIndexOf('}')
+  if (objectStart >= 0 && objectEnd > objectStart) candidates.push(cleaned.slice(objectStart, objectEnd + 1))
+
+  for (const candidate of candidates) {
+    try {
+      const parsed = JSON.parse(candidate)
+      if (Array.isArray(parsed)) return parsed
+      if (Array.isArray(parsed.rows)) return parsed.rows
+    } catch {
+      // Try the next JSON candidate.
+    }
+  }
+
+  return []
+}
+
+function mergeMissingFields(row, suggestion, dataset) {
+  const headers = dataset === 'companies' ? companyHeaders : opportunityHeaders
+  const current = normalizeRowForDataset(row, dataset)
+  const fallback = buildFallbackFilledRow(row, dataset)
+  const suggested = normalizeRowForDataset(suggestion || {}, dataset)
+
+  return headers.reduce((next, header) => {
+    next[header] = current[header] || suggested[header] || fallback[header] || ''
+    return next
+  }, {})
+}
+
+function DismissibleNotice({ children, className = '', onDismiss, title = 'Dismiss message' }) {
+  return (
+    <div className={`flex items-start gap-3 rounded-lg border p-3 ${className}`}>
+      <div className="min-w-0 flex-1">{children}</div>
+      {onDismiss && (
+        <button type="button" onClick={onDismiss} className="shrink-0 rounded-md p-1 transition hover:bg-black/5 dark:hover:bg-white/10" title={title}>
+          <X size={16} />
+        </button>
+      )}
+    </div>
+  )
+}
+
+function PreviewPanel({
+  rows,
+  dataset,
+  source,
+  importResult,
+  operationMessage,
+  importing,
+  onRowChange,
+  onRemove,
+  onClear,
+  onImport,
+  onDownload,
+  onDismissOperationMessage,
+  onDismissImportResult,
+}) {
   const headers = dataset === 'companies' ? companyHeaders : opportunityHeaders
   const summarizedErrors = useMemo(() => {
     const counts = new Map()
@@ -152,7 +322,9 @@ function PreviewPanel({ rows, dataset, source, importResult, operationMessage, i
           <h3 className="text-lg font-bold text-slate-950 dark:text-white">
             {rows.length} {dataset} rows
           </h3>
-          <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">{source || 'Nothing loaded yet'}</p>
+          <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+            {source || 'Nothing loaded yet'} {rows.length > 0 ? `| Import selected sends these rows to ${dataset === 'companies' ? 'Companies' : 'Opportunities'}.` : ''}
+          </p>
         </div>
         <div className="flex flex-wrap gap-3">
           <button type="button" onClick={onClear} disabled={rows.length === 0 && !source} className="btn-secondary">
@@ -171,18 +343,22 @@ function PreviewPanel({ rows, dataset, source, importResult, operationMessage, i
       </div>
 
       {operationMessage && (
-        <div className="mb-4 rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm font-semibold text-emerald-800 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-200">
+        <DismissibleNotice
+          className="mb-4 border-emerald-200 bg-emerald-50 text-sm font-semibold text-emerald-800 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-200"
+          onDismiss={onDismissOperationMessage}
+        >
           {operationMessage}
-        </div>
+        </DismissibleNotice>
       )}
 
       {importResult && (
-        <div
-          className={`mb-4 rounded-lg border p-3 text-sm ${
+        <DismissibleNotice
+          className={`mb-4 text-sm ${
             importResult.created > 0 || importResult.updated > 0
               ? 'border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-200'
               : 'border-amber-200 bg-amber-50 text-amber-900 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-200'
           }`}
+          onDismiss={onDismissImportResult}
         >
           Created {importResult.created}, updated {importResult.updated}, skipped {importResult.skipped}.
           {summarizedErrors.length > 0 && (
@@ -192,7 +368,7 @@ function PreviewPanel({ rows, dataset, source, importResult, operationMessage, i
               ))}
             </ul>
           )}
-        </div>
+        </DismissibleNotice>
       )}
 
       <div className="max-h-[min(62vh,560px)] w-full overflow-auto overscroll-contain rounded-lg border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-950">
@@ -214,7 +390,7 @@ function PreviewPanel({ rows, dataset, source, importResult, operationMessage, i
                   <button
                     type="button"
                     onClick={() => onRemove(index)}
-                    className="rounded-lg p-2 text-slate-500 hover:bg-rose-50 hover:text-rose-600 dark:text-slate-400 dark:hover:bg-rose-950/50 dark:hover:text-rose-300"
+                    className="cursor-pointer rounded-lg p-2 text-slate-500 hover:bg-rose-50 hover:text-rose-600 dark:text-slate-400 dark:hover:bg-rose-950/50 dark:hover:text-rose-300"
                     title="Remove row"
                   >
                     <Trash2 size={16} />
@@ -245,9 +421,14 @@ function PreviewPanel({ rows, dataset, source, importResult, operationMessage, i
 
 function DataHub() {
   const storedPreview = useMemo(readStoredDataHubPreview, [])
+  const initialAiTarget = storedPreview.activeDataset === 'companies' ? 'companies' : 'opportunities'
   const [activeTab, setActiveTab] = useState('companies')
   const [companies, setCompanies] = useState([])
+  const [opportunities, setOpportunities] = useState([])
+  const [databaseView, setDatabaseView] = useState('companies')
   const [includeSharedCompanies, setIncludeSharedCompanies] = useState(false)
+  const [includeSharedOpportunities, setIncludeSharedOpportunities] = useState(false)
+  const [databaseFilters, setDatabaseFilters] = useState({ search: '', scope: '', country: '', type: '', source: '' })
   const [companyDrafts, setCompanyDrafts] = useState({})
   const [resumes, setResumes] = useState([])
   const [activeDataset, setActiveDataset] = useState(storedPreview.activeDataset || 'companies')
@@ -257,6 +438,7 @@ function DataHub() {
   const [operationMessage, setOperationMessage] = useState(storedPreview.operationMessage || '')
   const [importingPreview, setImportingPreview] = useState(false)
   const [savingSharedIds, setSavingSharedIds] = useState([])
+  const [loadError, setLoadError] = useState('')
   const [aiNote, setAiNote] = useState(storedPreview.aiNote || '')
   const [loadingAi, setLoadingAi] = useState(false)
   const [adzunaCountries, setAdzunaCountries] = useState([])
@@ -274,25 +456,75 @@ function DataHub() {
   const [jdlResult, setJdlResult] = useState(storedPreview.jdlResult || null)
   const [loadingJdl, setLoadingJdl] = useState(false)
   const [aiForm, setAiForm] = useState({
-    prompt: 'Find software internships in Kuala Lumpur for students',
-    provider: 'jobdatalake',
+    target: initialAiTarget,
+    prompt: initialAiTarget === 'companies' ? 'Find software and AI companies in Kuala Lumpur for student outreach' : 'Find software internships in Kuala Lumpur for students',
+    provider: initialAiTarget === 'companies' ? 'google' : 'jobdatalake',
     country: 'MY',
     resultsPerPage: 20,
   })
   const [aiSourceResult, setAiSourceResult] = useState(storedPreview.aiSourceResult || null)
   const [loadingAiSource, setLoadingAiSource] = useState(false)
   const importLockRef = useRef(false)
+  const companyCountryOptions = useMemo(() => uniqueValues(companies, (company) => company.country), [companies])
+  const companySourceOptions = useMemo(() => uniqueValues(companies, (company) => company.sourceProvider || 'Manual'), [companies])
+  const opportunityTypeOptions = useMemo(() => uniqueValues(opportunities, (opportunity) => opportunity.type), [opportunities])
+  const opportunitySourceOptions = useMemo(() => uniqueValues(opportunities, (opportunity) => opportunity.sourceProvider || 'Manual'), [opportunities])
+  const filteredCompanies = useMemo(() => {
+    const term = normalizeSearchText(databaseFilters.search)
+    return companies.filter((company) => {
+      const row = companyToRow(company)
+      const matchesTerm = !term || Object.values(row).some((value) => matchesText(value, term))
+      const matchesScope = !databaseFilters.scope || (databaseFilters.scope === 'shared' ? company.isShared : !company.isShared)
+      const matchesCountry = !databaseFilters.country || company.country === databaseFilters.country
+      const source = company.sourceProvider || 'Manual'
+      const matchesSource = !databaseFilters.source || source === databaseFilters.source
+      return matchesTerm && matchesScope && matchesCountry && matchesSource
+    })
+  }, [companies, databaseFilters])
+  const filteredOpportunities = useMemo(() => {
+    const term = normalizeSearchText(databaseFilters.search)
+    return opportunities.filter((opportunity) => {
+      const row = opportunityToRow(opportunity)
+      const matchesTerm =
+        !term ||
+        Object.values(row).some((value) => matchesText(value, term)) ||
+        matchesText(opportunity.company?.industry, term)
+      const matchesScope = !databaseFilters.scope || (databaseFilters.scope === 'shared' ? opportunity.isShared : !opportunity.isShared)
+      const matchesType = !databaseFilters.type || opportunity.type === databaseFilters.type
+      const source = opportunity.sourceProvider || 'Manual'
+      const matchesSource = !databaseFilters.source || source === databaseFilters.source
+      return matchesTerm && matchesScope && matchesType && matchesSource
+    })
+  }, [databaseFilters, opportunities])
 
   useEffect(() => {
-    careerApi.companies({ includeShared: includeSharedCompanies }).then(setCompanies)
-    careerApi.resumes().then(setResumes)
-    careerApi.adzunaCountries().then(setAdzunaCountries).catch(() => null)
-  }, [includeSharedCompanies])
+    let mounted = true
+    setLoadError('')
+    Promise.all([
+      careerApi.companies({ includeShared: includeSharedCompanies }).catch((error) => {
+        if (mounted) setLoadError(error.message || 'Could not load companies.')
+        return []
+      }),
+      careerApi.resumes().catch(() => []),
+      careerApi.adzunaCountries().catch(() => []),
+      careerApi.opportunities({ includeShared: includeSharedOpportunities }).catch(() => []),
+    ]).then(([companyRows, resumeRows, countryRows, opportunityRows]) => {
+      if (!mounted) return
+      setCompanies(companyRows)
+      setResumes(resumeRows)
+      setAdzunaCountries(countryRows)
+      setOpportunities(opportunityRows)
+    })
+
+    return () => {
+      mounted = false
+    }
+  }, [includeSharedCompanies, includeSharedOpportunities])
 
   useEffect(() => {
-    localStorage.setItem(
+    writeScopedJson(
       DATA_HUB_PREVIEW_STORAGE_KEY,
-      JSON.stringify({
+      {
         activeDataset,
         previewRows,
         previewSource,
@@ -302,19 +534,21 @@ function DataHub() {
         adzunaResult,
         jdlResult,
         aiSourceResult,
-      }),
+      },
     )
   }, [activeDataset, previewRows, previewSource, importResult, operationMessage, aiNote, adzunaResult, jdlResult, aiSourceResult])
 
   const aiResumeVersions = useMemo(() => resumes.flatMap((resume) => resume.versions || []).filter((version) => version.isAiGenerated), [resumes])
 
   const linkedInScoutUrl = useMemo(() => {
-    const query = `${aiForm.prompt} careers jobs LinkedIn`
+    const query = aiForm.target === 'companies'
+      ? `${aiForm.prompt} companies LinkedIn`
+      : `${aiForm.prompt} careers jobs LinkedIn`
     return `https://www.linkedin.com/search/results/all/?keywords=${encodeURIComponent(query)}`
-  }, [aiForm.prompt])
+  }, [aiForm.prompt, aiForm.target])
 
-  function setProviderPreview(source, rows) {
-    setActiveDataset('opportunities')
+  function setProviderPreview(source, rows, dataset = 'opportunities') {
+    setActiveDataset(dataset)
     setPreviewSource(source)
     setPreviewRows(rows)
     setImportResult(null)
@@ -376,13 +610,40 @@ function DataHub() {
     setSavingSharedIds((ids) => [...new Set([...ids, company.id])])
     try {
       const result = await careerApi.saveSharedCompany(company.id)
-      setIncludeSharedCompanies(false)
-      setCompanies(await careerApi.companies({ includeShared: false }))
+      setCompanies((items) =>
+        items.map((item) =>
+          item.id === company.id
+            ? {
+                ...item,
+                ...(result.company || {}),
+                isShared: false,
+              }
+            : item,
+        ),
+      )
       setOperationMessage(
-        `Saved ${result.company?.name || company.name} to your workspace. ${result.opportunitiesCreated || 0} opportunities copied to Opportunities.`,
+        `Saved only ${result.company?.name || company.name} to your workspace. ${result.opportunitiesCreated || 0} linked opportunities copied to Opportunities.`,
       )
     } finally {
       setSavingSharedIds((ids) => ids.filter((id) => id !== company.id))
+    }
+  }
+
+  async function saveSharedOpportunity(opportunity) {
+    setSavingSharedIds((ids) => [...new Set([...ids, opportunity.id])])
+    try {
+      const result = await careerApi.saveSharedOpportunity(opportunity.id)
+      await Promise.all([
+        careerApi.opportunities({ includeShared: includeSharedOpportunities }).then(setOpportunities),
+        careerApi.companies({ includeShared: includeSharedCompanies }).then(setCompanies),
+      ])
+      setOperationMessage(
+        `Saved ${result.opportunity?.title || opportunity.title} to your Opportunities page. ${
+          result.companyCreated ? 'The linked company was also added to your company database.' : 'The linked company already existed in your workspace.'
+        }`,
+      )
+    } finally {
+      setSavingSharedIds((ids) => ids.filter((id) => id !== opportunity.id))
     }
   }
 
@@ -396,51 +657,58 @@ function DataHub() {
     const file = event.target.files?.[0]
     if (!file) return
     const text = await file.text()
-    setPreviewRows(parseCsv(text))
+    setPreviewRows(parseCsv(text).map((row) => normalizeRowForDataset(row, activeDataset)))
     setPreviewSource(`${file.name} upload`)
     setImportResult(null)
     setOperationMessage('')
     setAiNote('')
   }
 
-  async function aiFillRows() {
-    if (previewRows.length === 0) return
+  async function completeRowsWithAi(rowsToComplete, dataset) {
+    if (rowsToComplete.length === 0) return
     setLoadingAi(true)
     try {
       const response = await careerApi.aiChat({
         message:
-          'Review these CSV rows and suggest missing fields. Keep the answer concise and practical: ' +
-          JSON.stringify(previewRows.slice(0, 8)),
+          `Strictly complete missing ${dataset} CSV fields. Return only valid JSON in this shape: {"rows":[...]} with exactly ${Math.min(rowsToComplete.length, 8)} rows and these fields: ` +
+          `${(dataset === 'companies' ? companyHeaders : opportunityHeaders).join(', ')}. ` +
+          'Keep existing values unchanged. For unknown factual fields such as emails, salaries, deadlines, or job URLs, leave the field empty instead of inventing data. Rows: ' +
+          JSON.stringify(rowsToComplete.slice(0, 8).map((row) => normalizeRowForDataset(row, dataset))),
         history: [],
       })
-      setAiNote(response.reply)
-      setPreviewRows((rows) =>
-        rows.map((row) =>
-          activeDataset === 'companies'
-            ? {
-                ...row,
-                industry: row.industry || guessIndustry(row.name, row.website),
-                city: row.city || '',
-                country: row.country || '',
-                notes: row.notes || `AI-filled lead for ${row.name || 'this company'}. Verify details before importing.`,
-                sourceProvider: row.sourceProvider || 'Manual CSV',
-              }
-            : {
-                ...row,
-                type: row.type || 'Internship',
-                employmentType: row.employmentType || 'FullTime',
-                isRemote: row.isRemote || 'false',
-                requiredSkills: row.requiredSkills || row.skills || 'Communication,Problem Solving',
-                description: row.description || `AI-filled opportunity draft for ${row.title || 'this role'}. Verify details before importing.`,
-                sourceProvider: row.sourceProvider || 'Manual CSV',
-          },
-        ),
+      const aiRows = parseAiFilledRows(response.reply)
+      setAiNote(
+        aiRows.length
+          ? `AI completed missing ${dataset} fields. Review the preview before importing.`
+          : response.reply || 'AI responded, but no structured rows were returned. Safe local defaults were applied.',
       )
+      setPreviewRows(rowsToComplete.map((row, index) => mergeMissingFields(row, aiRows[index], dataset)))
     } catch (error) {
-      setAiNote(error.message || 'AI field filling is unavailable right now. You can still edit the preview rows manually.')
+      setPreviewRows(rowsToComplete.map((row) => buildFallbackFilledRow(row, dataset)))
+      setAiNote(error.message || 'AI field filling is unavailable right now. Safe local defaults were applied where possible.')
     } finally {
       setLoadingAi(false)
     }
+  }
+
+  async function aiFillRows() {
+    await completeRowsWithAi(previewRows, activeDataset)
+  }
+
+  async function completeDatabaseRowsWithAi() {
+    const dataset = databaseView
+    const rows = dataset === 'companies' ? companies.map(companyToRow) : opportunities.map(opportunityToRow)
+    if (rows.length === 0) {
+      setOperationMessage(`No ${dataset} rows are available to complete.`)
+      return
+    }
+
+    setActiveDataset(dataset)
+    setPreviewSource(`${dataset === 'companies' ? 'Companies' : 'Opportunities'} database rows`)
+    setImportResult(null)
+    setOperationMessage('')
+    setActiveTab('manual')
+    await completeRowsWithAi(rows, dataset)
   }
 
   async function exportFromBackend(dataset = activeDataset) {
@@ -467,7 +735,14 @@ function DataHub() {
       setOperationMessage(
         `Imported to ${activeDataset === 'companies' ? 'your company database' : 'your Opportunities page'}: ${result.created} created, ${result.updated} updated, ${result.skipped} skipped.`,
       )
-      if (activeDataset === 'companies') careerApi.companies({ includeShared: includeSharedCompanies }).then(setCompanies)
+      if (activeDataset === 'companies') {
+        careerApi.companies({ includeShared: includeSharedCompanies }).then(setCompanies).catch((error) => setLoadError(error.message || 'Could not refresh companies.'))
+      } else {
+        careerApi.opportunities({ includeShared: includeSharedOpportunities }).then(setOpportunities).catch((error) => setLoadError(error.message || 'Could not refresh opportunities.'))
+      }
+    } catch (error) {
+      setImportResult({ created: 0, updated: 0, skipped: previewRows.length, errors: [friendlyUserMessage(error.message)] })
+      setOperationMessage('Import could not complete. Review the rows and try again.')
     } finally {
       importLockRef.current = false
       setImportingPreview(false)
@@ -485,6 +760,15 @@ function DataHub() {
       const result = await careerApi.searchAdzunaOpportunities(adzunaForm)
       setAdzunaResult(result)
       setProviderPreview('Adzuna preview', (result.opportunities || []).map(opportunityToRow))
+    } catch (error) {
+      setAdzunaResult({
+        configured: false,
+        country: adzunaForm.country,
+        count: 0,
+        message: friendlyUserMessage(error.message, 'Adzuna search is unavailable right now. Try again later or use another source.'),
+        opportunities: [],
+      })
+      setProviderPreview('Adzuna unavailable', [])
     } finally {
       setLoadingAdzuna(false)
     }
@@ -496,6 +780,14 @@ function DataHub() {
       const result = await careerApi.searchJobDataLakeOpportunities(jdlForm)
       setJdlResult(result)
       setProviderPreview('JobDataLake preview', (result.opportunities || []).map(opportunityToRow))
+    } catch (error) {
+      setJdlResult({
+        configured: false,
+        count: 0,
+        message: friendlyUserMessage(error.message, 'JobDataLake search is unavailable right now. Try again later or use another source.'),
+        opportunities: [],
+      })
+      setProviderPreview('JobDataLake unavailable', [])
     } finally {
       setLoadingJdl(false)
     }
@@ -504,14 +796,21 @@ function DataHub() {
   async function searchWithAiSource() {
     setLoadingAiSource(true)
     try {
-      const result = await careerApi.aiSourceOpportunities({
+      const payload = {
         prompt: aiForm.prompt,
         provider: aiForm.provider,
         country: aiForm.country,
         resultsPerPage: aiForm.resultsPerPage,
-      })
+      }
+      const result = aiForm.target === 'companies'
+        ? await careerApi.aiSourceCompanies(payload)
+        : await careerApi.aiSourceOpportunities(payload)
       setAiSourceResult(result)
-      setProviderPreview(`AI + ${result.search?.provider || result.plan?.provider || 'provider'} preview`, (result.search?.opportunities || []).map(opportunityToRow))
+      if (aiForm.target === 'companies') {
+        setProviderPreview(`AI + ${result.search?.provider || result.plan?.provider || 'company scout'} preview`, (result.search?.companies || []).map(companyToRow), 'companies')
+      } else {
+        setProviderPreview(`AI + ${result.search?.provider || result.plan?.provider || 'provider'} preview`, (result.search?.opportunities || []).map(opportunityToRow), 'opportunities')
+      }
     } catch (error) {
       setAiSourceResult({
         plan: {
@@ -526,12 +825,13 @@ function DataHub() {
           country: aiForm.country,
           query: aiForm.prompt,
           configured: false,
-          message: error.message || 'AI sourcing is unavailable right now. Try again later or use Adzuna/JobDataLake directly.',
+          message: error.message || 'AI sourcing is unavailable right now. Try again later or use another source.',
           opportunities: [],
+          companies: [],
         },
         importResult: null,
       })
-      setProviderPreview('AI sourcing unavailable', [])
+      setProviderPreview('AI sourcing unavailable', [], aiForm.target === 'companies' ? 'companies' : 'opportunities')
     } finally {
       setLoadingAiSource(false)
     }
@@ -539,43 +839,11 @@ function DataHub() {
 
   function downloadTemplate() {
     if (activeDataset === 'companies') {
-      downloadCsv('careertrack-company-template.csv', [
-        {
-          name: 'Example Company',
-          industry: 'Technology',
-          city: 'Kuala Lumpur',
-          country: 'Malaysia',
-          website: 'https://example.com',
-          email: 'careers@example.com',
-          phone: '',
-          linkedInUrl: '',
-          notes: 'Hiring interns this summer',
-          sourceProvider: 'Manual CSV',
-        },
-      ])
+      downloadCsv('careertrack-company-template.csv', [], companyHeaders)
       return
     }
 
-    downloadCsv(
-      'careertrack-opportunity-template.csv',
-      [
-        {
-          title: 'Frontend Developer Intern',
-          companyName: 'Example Company',
-          type: 'Internship',
-          employmentType: 'FullTime',
-          description: 'Build React interfaces and integrate APIs.',
-          location: 'Kuala Lumpur',
-          isRemote: 'false',
-          applicationDeadline: '2026-08-01',
-          requiredSkills: 'React,JavaScript,CSS',
-          jobUrl: 'https://example.com/careers',
-          sourceUrl: 'https://example.com/careers',
-          sourceProvider: 'Manual CSV',
-        },
-      ],
-      opportunityHeaders,
-    )
+    downloadCsv('careertrack-opportunity-template.csv', [], opportunityHeaders)
   }
 
   return (
@@ -597,82 +865,250 @@ function DataHub() {
           </button>
         ))}
       </div>
+      {loadError && (
+        <DismissibleNotice
+          className="border-rose-200 bg-rose-50 text-sm font-semibold text-rose-700 dark:border-rose-800 dark:bg-rose-950/40 dark:text-rose-200"
+          onDismiss={() => setLoadError('')}
+        >
+          {loadError}
+        </DismissibleNotice>
+      )}
 
       {activeTab === 'companies' && (
-        <section className="grid gap-6 xl:grid-cols-[1fr_360px]">
-          <div className="card">
-            <p className="label">Company intelligence</p>
-            <h2 className="mt-1 text-2xl font-bold text-slate-950 dark:text-white">Companies in the database</h2>
+        <section className="grid min-w-0 gap-6 xl:grid-cols-[minmax(0,1fr)_360px]">
+          <div className="card min-w-0 overflow-hidden">
+            <p className="label">Workspace database</p>
+            <h2 className="mt-1 text-2xl font-bold text-slate-950 dark:text-white">Companies and opportunities in your database</h2>
             <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-500 dark:text-slate-400">
-              Keep this as the clean source of truth. Imported companies from CSV, Adzuna, JobDataLake, and AI review can all land here after approval.
+              Review the data already saved in your workspace, export it, or send it back to the review workspace for strict AI field completion.
             </p>
+            <div className="mt-5 flex w-full max-w-md rounded-lg border border-slate-200 bg-white p-1 dark:border-slate-800 dark:bg-slate-950">
+              {[
+                ['companies', 'Companies'],
+                ['opportunities', 'Opportunities'],
+              ].map(([value, label]) => (
+                <button
+                  key={value}
+                  type="button"
+                  onClick={() => setDatabaseView(value)}
+                  className={`flex-1 rounded-md px-3 py-2 text-sm font-semibold ${
+                    databaseView === value ? 'bg-slate-950 text-white dark:bg-teal-400 dark:text-slate-950' : 'text-slate-600 dark:text-slate-300'
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
             <div className="mt-5 flex flex-wrap gap-3">
-              <button onClick={() => exportFromBackend('companies')} className="btn-primary">
+              <button onClick={() => exportFromBackend(databaseView)} className="btn-primary">
                 <FileDown size={17} />
-                Export companies
+                Export {databaseView}
               </button>
-              <button type="button" onClick={() => setIncludeSharedCompanies((value) => !value)} className="btn-secondary">
-                <Database size={17} />
-                {includeSharedCompanies ? 'Show my companies only' : 'Load shared database'}
-              </button>
-              <button onClick={() => setActiveTab('manual')} className="btn-secondary">
+              {databaseView === 'companies' && (
+                <button type="button" onClick={() => setIncludeSharedCompanies((value) => !value)} className="btn-secondary">
+                  <Database size={17} />
+                  {includeSharedCompanies ? 'Show my companies only' : 'Load shared Companies'}
+                </button>
+              )}
+              {databaseView === 'opportunities' && (
+                <button type="button" onClick={() => setIncludeSharedOpportunities((value) => !value)} className="btn-secondary">
+                  <Database size={17} />
+                  {includeSharedOpportunities ? 'Show my opportunities only' : 'Load shared Opportunities'}
+                </button>
+              )}
+              <button
+                onClick={() => {
+                  setActiveDataset(databaseView)
+                  setActiveTab('manual')
+                }}
+                className="btn-secondary"
+              >
                 <FileUp size={17} />
                 Import CSV
               </button>
+              <button onClick={completeDatabaseRowsWithAi} disabled={loadingAi || (databaseView === 'companies' ? companies.length === 0 : opportunities.length === 0)} className="btn-secondary">
+                {loadingAi ? <LoaderCircle className="animate-spin" size={17} /> : <Wand2 size={17} />}
+                {loadingAi ? 'Completing...' : 'Strict AI complete fields'}
+              </button>
             </div>
+            <p className="mt-3 max-w-3xl text-xs leading-5 text-slate-500 dark:text-slate-400">
+              {databaseView === 'companies'
+                ? 'Save to mine copies one shared company into your private workspace. Save updates your own company rows.'
+                : 'Save to mine copies one shared opportunity and its company into your private workspace. Personal opportunities are managed from Opportunities.'}
+            </p>
             {operationMessage && (
-              <div className="mt-5 rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm font-semibold text-emerald-800 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-200">
+              <DismissibleNotice
+                className="mt-5 border-emerald-200 bg-emerald-50 text-sm font-semibold text-emerald-800 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-200"
+                onDismiss={() => setOperationMessage('')}
+              >
                 {operationMessage}
-              </div>
+              </DismissibleNotice>
             )}
-            <div className="mt-6 max-h-[min(62vh,560px)] w-full overflow-auto overscroll-contain rounded-lg border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-950">
-              <table className="w-full min-w-[1120px] border-collapse text-left text-sm">
-                <thead className="sticky top-0 bg-slate-100 text-xs uppercase tracking-[0.12em] text-slate-500 dark:bg-slate-950 dark:text-slate-400">
-                  <tr>
-                    <th className="border-b border-slate-200 px-3 py-3 dark:border-slate-800">Actions</th>
-                    <th className="border-b border-slate-200 px-3 py-3 dark:border-slate-800">scope</th>
-                    {visibleCompanyFields.map((header) => (
-                      <th key={header} className="border-b border-slate-200 px-3 py-3 dark:border-slate-800">
-                        {header}
-                      </th>
+            <div className="mt-6 grid gap-3 md:grid-cols-[minmax(220px,1fr)_140px_170px_190px]">
+              <label className="block">
+                <span className="label">Search</span>
+                <div className="relative mt-2">
+                  <Search className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={17} />
+                  <input
+                    className="input pl-10"
+                    value={databaseFilters.search}
+                    onChange={(event) => setDatabaseFilters({ ...databaseFilters, search: event.target.value })}
+                    placeholder={databaseView === 'companies' ? 'Company, industry, city, website' : 'Role, company, skills, location'}
+                  />
+                </div>
+              </label>
+              <label className="block">
+                <span className="label">Scope</span>
+                <select className="input mt-2" value={databaseFilters.scope} onChange={(event) => setDatabaseFilters({ ...databaseFilters, scope: event.target.value })}>
+                  <option value="">All rows</option>
+                  <option value="mine">Mine</option>
+                  <option value="shared">Shared</option>
+                </select>
+              </label>
+              {databaseView === 'companies' ? (
+                <label className="block">
+                  <span className="label">Country</span>
+                  <select className="input mt-2" value={databaseFilters.country} onChange={(event) => setDatabaseFilters({ ...databaseFilters, country: event.target.value })}>
+                    <option value="">All countries</option>
+                    {companyCountryOptions.map((country) => (
+                      <option key={country} value={country}>{country}</option>
                     ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {companies.map((company) => (
-                    <tr key={company.id} className="border-b border-slate-100 last:border-0 dark:border-slate-800">
-                      <td className="px-3 py-3">
-                        <div className="flex gap-2">
-                          <button type="button" onClick={() => saveCompany(company)} disabled={savingSharedIds.includes(company.id)} className="rounded-lg bg-teal-50 px-3 py-2 text-xs font-bold text-teal-700 hover:bg-teal-100 disabled:cursor-not-allowed disabled:opacity-45 dark:bg-teal-950/70 dark:text-teal-200">
-                            {savingSharedIds.includes(company.id) ? 'Saving...' : company.isShared ? 'Save to mine' : 'Save'}
-                          </button>
-                          <button type="button" onClick={() => deleteCompany(company.id)} disabled={company.isShared} className="rounded-lg p-2 text-slate-500 hover:bg-rose-50 hover:text-rose-600 disabled:cursor-not-allowed disabled:opacity-45 dark:text-slate-400 dark:hover:bg-rose-950/50 dark:hover:text-rose-300" title={company.isShared ? 'Shared rows cannot be edited here' : 'Delete company'}>
-                            <Trash2 size={16} />
-                          </button>
-                        </div>
-                      </td>
-                      <td className="px-3 py-3">
-                        <span className={company.isShared ? 'status-pill bg-amber-50 text-amber-700 dark:bg-amber-950/60 dark:text-amber-200' : 'status-pill bg-teal-50 text-teal-700 dark:bg-teal-950/70 dark:text-teal-200'}>
-                          {company.isShared ? 'Shared' : 'Mine'}
-                        </span>
-                      </td>
+                  </select>
+                </label>
+              ) : (
+                <label className="block">
+                  <span className="label">Type</span>
+                  <select className="input mt-2" value={databaseFilters.type} onChange={(event) => setDatabaseFilters({ ...databaseFilters, type: event.target.value })}>
+                    <option value="">All types</option>
+                    {opportunityTypeOptions.map((type) => (
+                      <option key={type} value={type}>{type}</option>
+                    ))}
+                  </select>
+                </label>
+              )}
+              <label className="block">
+                <span className="label">Source</span>
+                <select className="input mt-2" value={databaseFilters.source} onChange={(event) => setDatabaseFilters({ ...databaseFilters, source: event.target.value })}>
+                  <option value="">All sources</option>
+                  {(databaseView === 'companies' ? companySourceOptions : opportunitySourceOptions).map((source) => (
+                    <option key={source} value={source}>{source}</option>
+                  ))}
+                </select>
+              </label>
+            </div>
+            {databaseView === 'companies' ? (
+              <div className="mt-6 max-h-[min(62vh,560px)] w-full max-w-full overflow-auto overscroll-contain rounded-lg border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-950">
+                <table className="w-full min-w-[2140px] border-collapse text-left text-sm">
+                  <thead className="sticky top-0 z-10 bg-slate-100 text-xs uppercase tracking-[0.12em] text-slate-500 dark:bg-slate-950 dark:text-slate-400">
+                    <tr>
+                      <th className="border-b border-slate-200 px-3 py-3 dark:border-slate-800">Actions</th>
+                      <th className="border-b border-slate-200 px-3 py-3 dark:border-slate-800">scope</th>
                       {visibleCompanyFields.map((header) => (
-                        <td key={header} className="min-w-40 px-3 py-3 text-slate-700 dark:text-slate-300">
-                          <input
-                            className="w-full rounded-md border border-transparent bg-transparent px-2 py-1 outline-none transition focus:border-teal-300 focus:bg-white dark:focus:border-teal-700 dark:focus:bg-slate-900"
-                            value={companyValue(company, header)}
-                            onChange={(event) => updateCompanyDraft(company.id, header, event.target.value)}
-                          />
-                        </td>
+                        <th key={header} className="border-b border-slate-200 px-3 py-3 dark:border-slate-800">
+                          {header}
+                        </th>
                       ))}
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+                  </thead>
+                  <tbody>
+                    {filteredCompanies.length === 0 ? (
+                      <tr>
+                        <td colSpan={visibleCompanyFields.length + 2} className="px-3 py-8 text-center text-sm font-semibold text-slate-500 dark:text-slate-400">
+                          No companies match the current filters.
+                        </td>
+                      </tr>
+                    ) : filteredCompanies.map((company) => (
+                      <tr key={company.id} className="border-b border-slate-100 last:border-0 dark:border-slate-800">
+                        <td className="px-3 py-3">
+                          <div className="flex gap-2">
+                            <button type="button" onClick={() => saveCompany(company)} disabled={savingSharedIds.includes(company.id)} className="cursor-pointer rounded-lg bg-teal-50 px-3 py-2 text-xs font-bold text-teal-700 hover:bg-teal-100 disabled:cursor-not-allowed disabled:opacity-45 dark:bg-teal-950/70 dark:text-teal-200">
+                              {savingSharedIds.includes(company.id) ? 'Saving...' : company.isShared ? 'Save to mine' : 'Save'}
+                            </button>
+                            <button type="button" onClick={() => deleteCompany(company.id)} disabled={company.isShared} className="cursor-pointer rounded-lg p-2 text-slate-500 hover:bg-rose-50 hover:text-rose-600 disabled:cursor-not-allowed disabled:opacity-45 dark:text-slate-400 dark:hover:bg-rose-950/50 dark:hover:text-rose-300" title={company.isShared ? 'Shared rows cannot be edited here' : 'Delete company'}>
+                              <Trash2 size={16} />
+                            </button>
+                          </div>
+                        </td>
+                        <td className="px-3 py-3">
+                          <span className={company.isShared ? 'status-pill bg-amber-50 text-amber-700 dark:bg-amber-950/60 dark:text-amber-200' : 'status-pill bg-teal-50 text-teal-700 dark:bg-teal-950/70 dark:text-teal-200'}>
+                            {company.isShared ? 'Shared' : 'Mine'}
+                          </span>
+                        </td>
+                        {visibleCompanyFields.map((header) => (
+                          <td key={header} className="min-w-40 px-3 py-3 text-slate-700 dark:text-slate-300">
+                            <input
+                              className="w-full rounded-md border border-transparent bg-transparent px-2 py-1 outline-none transition focus:border-teal-300 focus:bg-white dark:focus:border-teal-700 dark:focus:bg-slate-900"
+                              value={companyValue(company, header)}
+                              onChange={(event) => updateCompanyDraft(company.id, header, event.target.value)}
+                            />
+                          </td>
+                        ))}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <div className="mt-6 max-h-[min(62vh,560px)] w-full max-w-full overflow-auto overscroll-contain rounded-lg border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-950">
+                <table className="w-full min-w-[1220px] border-collapse text-left text-sm">
+                  <thead className="sticky top-0 z-10 bg-slate-100 text-xs uppercase tracking-[0.12em] text-slate-500 dark:bg-slate-950 dark:text-slate-400">
+                    <tr>
+                      <th className="border-b border-slate-200 px-3 py-3 dark:border-slate-800">Actions</th>
+                      <th className="border-b border-slate-200 px-3 py-3 dark:border-slate-800">scope</th>
+                      {visibleOpportunityFields.map((header) => (
+                        <th key={header} className="border-b border-slate-200 px-3 py-3 dark:border-slate-800">
+                          {header}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredOpportunities.length === 0 ? (
+                      <tr>
+                        <td colSpan={visibleOpportunityFields.length + 2} className="px-3 py-8 text-center text-sm font-semibold text-slate-500 dark:text-slate-400">
+                          No opportunities match the current filters.
+                        </td>
+                      </tr>
+                    ) : filteredOpportunities.map((opportunity) => {
+                      const row = opportunityToRow(opportunity)
+                      return (
+                        <tr key={opportunity.id} className="border-b border-slate-100 last:border-0 dark:border-slate-800">
+                          <td className="px-3 py-3">
+                            <button
+                              type="button"
+                              onClick={() => saveSharedOpportunity(opportunity)}
+                              disabled={!opportunity.isShared || savingSharedIds.includes(opportunity.id)}
+                              className="cursor-pointer rounded-lg bg-teal-50 px-3 py-2 text-xs font-bold text-teal-700 hover:bg-teal-100 disabled:cursor-not-allowed disabled:opacity-45 dark:bg-teal-950/70 dark:text-teal-200"
+                            >
+                              {savingSharedIds.includes(opportunity.id) ? 'Saving...' : opportunity.isShared ? 'Save to mine' : 'Saved'}
+                            </button>
+                          </td>
+                          <td className="px-3 py-3">
+                            <span className={opportunity.isShared ? 'status-pill bg-amber-50 text-amber-700 dark:bg-amber-950/60 dark:text-amber-200' : 'status-pill bg-teal-50 text-teal-700 dark:bg-teal-950/70 dark:text-teal-200'}>
+                              {opportunity.isShared ? 'Shared' : 'Mine'}
+                            </span>
+                          </td>
+                          {visibleOpportunityFields.map((header) => (
+                            <td key={header} className="min-w-40 px-3 py-3 text-slate-700 dark:text-slate-300">
+                              {header === 'jobUrl' && row[header] ? (
+                                <a href={row[header]} target="_blank" rel="noreferrer" className="font-semibold text-teal-700 hover:underline dark:text-teal-300">
+                                  Open link
+                                </a>
+                              ) : (
+                                row[header] || '-'
+                              )}
+                            </td>
+                          ))}
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
 
-          <aside className="rounded-lg border border-teal-200 bg-teal-50 p-5 dark:border-teal-800 dark:bg-teal-950/60">
+          <aside className="min-w-0 rounded-lg border border-teal-200 bg-teal-50 p-5 dark:border-teal-800 dark:bg-teal-950/60">
             <p className="label">Database status</p>
             <div className="mt-4 grid grid-cols-2 gap-4">
               <div>
@@ -680,10 +1116,13 @@ function DataHub() {
                 <p className="text-sm text-teal-800 dark:text-teal-200">Companies</p>
               </div>
               <div>
-                <p className="text-3xl font-bold text-teal-950 dark:text-white">{previewRows.length}</p>
-                <p className="text-sm text-teal-800 dark:text-teal-200">Preview rows</p>
+                <p className="text-3xl font-bold text-teal-950 dark:text-white">{opportunities.length}</p>
+                <p className="text-sm text-teal-800 dark:text-teal-200">Opportunities</p>
               </div>
             </div>
+            <p className="mt-4 text-sm leading-6 text-teal-800 dark:text-teal-200">
+              Review rows here, then use strict AI completion to send them into the editable review workspace before importing updates.
+            </p>
           </aside>
         </section>
       )}
@@ -770,9 +1209,12 @@ function DataHub() {
             </button>
             {loadingAi && <p className="mt-2 text-xs font-semibold text-slate-500 dark:text-slate-400">AI is still reviewing the preview rows.</p>}
             {aiNote && (
-              <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm leading-6 text-amber-900 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-200">
+              <DismissibleNotice
+                className="mt-4 border-amber-200 bg-amber-50 text-sm leading-6 text-amber-900 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-200"
+                onDismiss={() => setAiNote('')}
+              >
                 {aiNote}
-              </div>
+              </DismissibleNotice>
             )}
           </div>
           <PreviewPanel
@@ -787,6 +1229,8 @@ function DataHub() {
             onClear={clearPreview}
             onImport={importPreviewToBackend}
             onDownload={downloadPreview}
+            onDismissOperationMessage={() => setOperationMessage('')}
+            onDismissImportResult={() => setImportResult(null)}
           />
         </section>
       )}
@@ -829,10 +1273,17 @@ function DataHub() {
               <p>Configured: {adzunaResult ? String(adzunaResult.configured) : 'not checked'}</p>
               <p>Country: {adzunaResult?.country?.toUpperCase() || adzunaForm.country.toUpperCase()}</p>
               <p>Matched jobs: {adzunaResult?.count ?? '-'}</p>
-              {adzunaResult?.message && <p className="mt-3 rounded-lg bg-amber-50 p-3 text-amber-900 dark:bg-amber-950/40 dark:text-amber-200">{adzunaResult.message}</p>}
+              {adzunaResult?.message && (
+                <DismissibleNotice
+                  className="mt-3 border-amber-200 bg-amber-50 text-amber-900 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-200"
+                  onDismiss={() => setAdzunaResult({ ...adzunaResult, message: '' })}
+                >
+                  {adzunaResult.message}
+                </DismissibleNotice>
+              )}
             </div>
           </div>
-            <PreviewPanel rows={previewRows} dataset="opportunities" source={previewSource} importResult={importResult} operationMessage={operationMessage} importing={importingPreview} onRowChange={updatePreviewRow} onRemove={removePreviewRow} onClear={clearPreview} onImport={importPreviewToBackend} onDownload={downloadPreview} />
+            <PreviewPanel rows={previewRows} dataset="opportunities" source={previewSource} importResult={importResult} operationMessage={operationMessage} importing={importingPreview} onRowChange={updatePreviewRow} onRemove={removePreviewRow} onClear={clearPreview} onImport={importPreviewToBackend} onDownload={downloadPreview} onDismissOperationMessage={() => setOperationMessage('')} onDismissImportResult={() => setImportResult(null)} />
         </section>
       )}
 
@@ -879,10 +1330,17 @@ function DataHub() {
             <div className="mt-5 rounded-lg bg-slate-50 p-4 text-sm text-slate-600 dark:bg-slate-950 dark:text-slate-300">
               <p>Configured: {jdlResult ? String(jdlResult.configured) : 'not checked'}</p>
               <p>Matched jobs: {jdlResult?.count ?? '-'}</p>
-              {jdlResult?.message && <p className="mt-3 rounded-lg bg-amber-50 p-3 text-amber-900 dark:bg-amber-950/40 dark:text-amber-200">{jdlResult.message}</p>}
+              {jdlResult?.message && (
+                <DismissibleNotice
+                  className="mt-3 border-amber-200 bg-amber-50 text-amber-900 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-200"
+                  onDismiss={() => setJdlResult({ ...jdlResult, message: '' })}
+                >
+                  {jdlResult.message}
+                </DismissibleNotice>
+              )}
             </div>
           </div>
-          <PreviewPanel rows={previewRows} dataset="opportunities" source={previewSource} importResult={importResult} operationMessage={operationMessage} importing={importingPreview} onRowChange={updatePreviewRow} onRemove={removePreviewRow} onClear={clearPreview} onImport={importPreviewToBackend} onDownload={downloadPreview} />
+          <PreviewPanel rows={previewRows} dataset="opportunities" source={previewSource} importResult={importResult} operationMessage={operationMessage} importing={importingPreview} onRowChange={updatePreviewRow} onRemove={removePreviewRow} onClear={clearPreview} onImport={importPreviewToBackend} onDownload={downloadPreview} onDismissOperationMessage={() => setOperationMessage('')} onDismissImportResult={() => setImportResult(null)} />
         </section>
       )}
 
@@ -890,11 +1348,44 @@ function DataHub() {
         <section className="grid gap-6 xl:grid-cols-[390px_1fr]">
           <div className="card h-fit">
             <p className="label">AI sourcing agent</p>
-            <h3 className="mt-1 text-lg font-bold text-slate-950 dark:text-white">AI-assisted opportunity discovery</h3>
+            <h3 className="mt-1 text-lg font-bold text-slate-950 dark:text-white">AI-assisted company and opportunity discovery</h3>
             <p className="mt-2 text-sm leading-6 text-slate-500 dark:text-slate-400">
-              AI creates the sourcing plan, then searches the selected provider. Google and LinkedIn scout use Gemini search grounding and return reviewable rows before import.
+              Choose whether AI should return companies or job opportunities. Results always go to the review workspace before anything is imported.
             </p>
             <div className="mt-5 space-y-4">
+              <div>
+                <span className="label">Target</span>
+                <div className="mt-2 flex rounded-lg border border-slate-200 bg-white p-1 dark:border-slate-800 dark:bg-slate-950">
+                  {[
+                    ['opportunities', 'Opportunities'],
+                    ['companies', 'Companies'],
+                  ].map(([value, label]) => (
+                    <button
+                      key={value}
+                      type="button"
+                      onClick={() => {
+                        setAiForm({
+                          ...aiForm,
+                          target: value,
+                          provider: value === 'companies' ? 'google' : 'jobdatalake',
+                          prompt: value === 'companies' ? 'Find software and AI companies in Kuala Lumpur for student outreach' : 'Find software internships in Kuala Lumpur for students',
+                        })
+                        setActiveDataset(value)
+                        setPreviewRows([])
+                        setPreviewSource('')
+                        setImportResult(null)
+                        setOperationMessage('')
+                        setAiSourceResult(null)
+                      }}
+                      className={`flex-1 rounded-md px-3 py-2 text-sm font-semibold ${
+                        aiForm.target === value ? 'bg-slate-950 text-white dark:bg-teal-400 dark:text-slate-950' : 'text-slate-600 dark:text-slate-300'
+                      }`}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              </div>
               <label className="block">
                 <span className="label">Request</span>
                 <textarea className="input mt-2 min-h-28 resize-y" value={aiForm.prompt} onChange={(event) => setAiForm({ ...aiForm, prompt: event.target.value })} />
@@ -903,10 +1394,19 @@ function DataHub() {
                 <label>
                   <span className="label">Provider</span>
                   <select className="input mt-2" value={aiForm.provider} onChange={(event) => setAiForm({ ...aiForm, provider: event.target.value })}>
-                    <option value="jobdatalake">JobDataLake</option>
-                    <option value="adzuna">Adzuna</option>
-                    <option value="google">Google Search Scout</option>
-                    <option value="linkedin">LinkedIn Search Scout</option>
+                    {aiForm.target === 'companies' ? (
+                      <>
+                        <option value="google">Google Company Scout</option>
+                        <option value="linkedin">LinkedIn Company Scout</option>
+                      </>
+                    ) : (
+                      <>
+                        <option value="jobdatalake">JobDataLake</option>
+                        <option value="adzuna">Adzuna</option>
+                        <option value="google">Google Search Scout</option>
+                        <option value="linkedin">LinkedIn Search Scout</option>
+                      </>
+                    )}
                   </select>
                 </label>
                 <label>
@@ -920,12 +1420,12 @@ function DataHub() {
               </label>
               <button type="button" onClick={searchWithAiSource} disabled={loadingAiSource} className="btn-primary w-full">
                 {loadingAiSource ? <LoaderCircle className="animate-spin" size={17} /> : <Sparkles size={17} />}
-                {loadingAiSource ? 'AI is scouting...' : 'AI preview rows'}
+                {loadingAiSource ? 'AI is scouting...' : `AI preview ${aiForm.target}`}
               </button>
               {loadingAiSource && <p className="text-xs font-semibold text-slate-500 dark:text-slate-400">AI is building a sourcing plan and collecting reviewable rows.</p>}
               <a href={linkedInScoutUrl} target="_blank" rel="noreferrer" className="btn-secondary w-full justify-center">
                 <ExternalLink size={17} />
-                Open LinkedIn scout search
+                Open LinkedIn {aiForm.target === 'companies' ? 'company' : 'job'} scout search
               </a>
             </div>
             {aiSourceResult?.plan && (
@@ -936,14 +1436,17 @@ function DataHub() {
                 <p>Country: {aiSourceResult.plan.country || aiForm.country || 'Any'}</p>
                 <p className="mt-2 text-slate-500 dark:text-slate-400">{friendlyUserMessage(aiSourceResult.plan.reason)}</p>
                 {aiSourceResult.search?.message && (
-                  <p className="mt-3 rounded-lg bg-amber-50 p-3 text-amber-900 dark:bg-amber-950/40 dark:text-amber-200">
+                  <DismissibleNotice
+                    className="mt-3 border-amber-200 bg-amber-50 text-amber-900 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-200"
+                    onDismiss={() => setAiSourceResult({ ...aiSourceResult, search: { ...aiSourceResult.search, message: '' } })}
+                  >
                     {friendlyUserMessage(aiSourceResult.search.message, 'AI sourcing is unavailable right now. Try again later or use another provider.')}
-                  </p>
+                  </DismissibleNotice>
                 )}
               </div>
             )}
           </div>
-          <PreviewPanel rows={previewRows} dataset="opportunities" source={previewSource} importResult={importResult} operationMessage={operationMessage} importing={importingPreview} onRowChange={updatePreviewRow} onRemove={removePreviewRow} onClear={clearPreview} onImport={importPreviewToBackend} onDownload={downloadPreview} />
+          <PreviewPanel rows={previewRows} dataset={activeDataset} source={previewSource} importResult={importResult} operationMessage={operationMessage} importing={importingPreview} onRowChange={updatePreviewRow} onRemove={removePreviewRow} onClear={clearPreview} onImport={importPreviewToBackend} onDownload={downloadPreview} onDismissOperationMessage={() => setOperationMessage('')} onDismissImportResult={() => setImportResult(null)} />
         </section>
       )}
     </div>

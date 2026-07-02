@@ -1,16 +1,7 @@
 import axios from 'axios'
-import {
-  mockApplications,
-  mockDashboard,
-  mockInterviews,
-  mockNotifications,
-  mockOpportunities,
-  mockResumes,
-  mockUser,
-} from '../data/mockData.js'
+import { readScopedJson, removeScopedStorage, writeScopedJson } from './userStorage.js'
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5185/api'
-const USE_MOCKS = import.meta.env.VITE_USE_MOCKS === 'true'
 
 export const api = axios.create({
   baseURL: API_BASE_URL,
@@ -19,9 +10,7 @@ export const api = axios.create({
 
 api.interceptors.request.use((config) => {
   const token = localStorage.getItem('careertrack_access_token')
-  if (token) {
-    config.headers.Authorization = `Bearer ${token}`
-  }
+  if (token) config.headers.Authorization = `Bearer ${token}`
   return config
 })
 
@@ -63,21 +52,16 @@ export function friendlyUserMessage(value, fallback = 'The request could not be 
   const lower = text.toLowerCase()
 
   if (!text || text === '{}') return fallback
-  if (lower.includes('quota') || lower.includes('resource_exhausted') || lower.includes('rate limit') || lower.includes('429')) {
-    return 'The AI quota or daily limit has been reached. Try again later or switch to another API key.'
-  }
-  if (lower.includes('api key') || lower.includes('apikey') || lower.includes('unauthorized') || lower.includes('permission') || lower.includes('401') || lower.includes('403')) {
-    return 'The AI provider rejected the request. Check the API key permissions and model access.'
-  }
-  if (lower.includes('not configured') || lower.includes('local-fallback')) {
-    return 'The AI provider is not configured yet. Connect a Gemini API key in the backend settings.'
-  }
-  if (lower.includes('model') && (lower.includes('not found') || lower.includes('404'))) {
-    return 'The configured AI model could not be found. Check the backend AI model setting.'
-  }
-  if (lower.includes('socket') || lower.includes('network') || lower.includes('timeout') || lower.includes('timed out') || lower.includes('dns')) {
-    return 'The app could not reach the AI service right now. Check the connection and try again.'
-  }
+  if (lower.includes('too many requests')) return 'Too many requests. Please wait a moment and try again.'
+  if (lower.includes('password') && lower.includes('8')) return 'Password must be at least 8 characters. Use a mix of letters and numbers for a safer account.'
+  if (lower.includes('password') && (lower.includes('required') || lower.includes('invalid'))) return 'Enter a valid password before creating your account.'
+  if (lower.includes('email already exists') || lower.includes('already exists') || lower.includes('conflict')) return 'An account with this email already exists. Sign in instead or use another email.'
+  if (lower.includes('quota') || lower.includes('resource_exhausted') || lower.includes('rate limit') || lower.includes('429')) return 'The AI quota or daily limit has been reached. Try again later or switch to another API key.'
+  if (lower.includes('api key') || lower.includes('apikey') || lower.includes('gemini') || lower.includes('ai provider')) return 'The AI provider rejected the request. Check the API key permissions and model access.'
+  if (lower.includes('forbidden') || lower.includes('unauthorized') || lower.includes('not authorized') || lower.includes('401') || lower.includes('403')) return 'You do not have permission to perform this action. Sign in with an admin account and try again.'
+  if (lower.includes('not configured') || lower.includes('local-fallback')) return 'The AI provider is not configured yet. Connect a Gemini API key in the backend settings.'
+  if (lower.includes('model') && (lower.includes('not found') || lower.includes('404'))) return 'The configured AI model could not be found. Check the backend AI model setting.'
+  if (lower.includes('socket') || lower.includes('network') || lower.includes('timeout') || lower.includes('timed out') || lower.includes('dns')) return 'The app could not reach the service right now. Check the connection and try again.'
   if (
     lower.includes('request failed with status code') ||
     lower.includes('response status code') ||
@@ -97,14 +81,34 @@ export function friendlyUserMessage(value, fallback = 'The request could not be 
 
 function friendlyErrorMessage(error, fallback) {
   const responseData = error?.response?.data
+  const validationErrors = responseData?.errors && !Array.isArray(responseData.errors) && typeof responseData.errors === 'object'
+    ? Object.values(responseData.errors).flat().join(' ')
+    : ''
   const responseMessage =
     responseData?.message ||
     responseData?.errors?.[0] ||
+    validationErrors ||
     responseData?.title ||
     (typeof responseData === 'string' ? responseData : '')
   const status = error?.response?.status
   const combined = [responseMessage, status ? `status ${status}` : '', error?.message || ''].filter(Boolean).join(' ')
   return friendlyUserMessage(combined, fallback)
+}
+
+async function requestApi(request, fallback = 'The request could not be completed. Please try again.') {
+  try {
+    return unwrap((await request()).data)
+  } catch (error) {
+    throw new Error(friendlyErrorMessage(error, fallback))
+  }
+}
+
+async function requestBlob(request, fallback = 'The file could not be downloaded right now.') {
+  try {
+    return (await request()).data
+  } catch (error) {
+    throw new Error(friendlyErrorMessage(error, fallback))
+  }
 }
 
 export function saveAuth(auth) {
@@ -119,23 +123,13 @@ export function clearAuth() {
   localStorage.removeItem('careertrack_user')
 }
 
-async function requestWithMock(request, fallback) {
-  try {
-    return unwrap((await request()).data)
-  } catch (error) {
-    if (!USE_MOCKS) throw new Error(friendlyErrorMessage(error, 'The request could not be completed. Please try again.'))
-    await new Promise((resolve) => setTimeout(resolve, 220))
-    return typeof fallback === 'function' ? fallback() : fallback
-  }
-}
-
 function estimateTokens(value) {
   const text = typeof value === 'string' ? value : JSON.stringify(value ?? '')
   return Math.max(1, Math.ceil(text.length / 4))
 }
 
 function recordAiUsage(feature, input, output) {
-  const current = JSON.parse(localStorage.getItem('careertrack_ai_usage') || '[]')
+  const current = readScopedJson('careertrack_ai_usage', [])
   current.push({
     id: crypto.randomUUID?.() || String(Date.now()),
     feature,
@@ -143,290 +137,110 @@ function recordAiUsage(feature, input, output) {
     outputTokens: estimateTokens(output),
     createdAt: new Date().toISOString(),
   })
-  localStorage.setItem('careertrack_ai_usage', JSON.stringify(current.slice(-300)))
+  writeScopedJson('careertrack_ai_usage', current.slice(-300))
 }
 
 export const authApi = {
-  login: (payload) =>
-    requestWithMock(
-      () => api.post('/auth/login', payload),
-      {
-        accessToken: 'mock-access-token',
-        refreshToken: 'mock-refresh-token',
-        expiresAt: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
-        user: mockUser,
-      },
-    ),
-  register: (payload) =>
-    requestWithMock(
-      () => api.post('/auth/register', payload),
-      {
-        accessToken: 'mock-access-token',
-        refreshToken: 'mock-refresh-token',
-        expiresAt: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
-        user: { ...mockUser, fullName: payload.fullName, email: payload.email },
-      },
-    ),
+  login: (payload) => requestApi(() => api.post('/auth/login', payload), 'Unable to sign in. Check your email and password.'),
+  register: (payload) => requestApi(() => api.post('/auth/register', payload), 'Unable to create account. Check the form and try again.'),
+  refreshToken: (refreshToken) => requestApi(() => axios.post(`${API_BASE_URL}/auth/refresh-token`, { refreshToken }), 'Could not refresh your session. Please sign in again.'),
   logout: (refreshToken) => api.post('/auth/logout', { refreshToken }).catch(() => null),
 }
 
 export const careerApi = {
-  getMe: () => requestWithMock(() => api.get('/users/me'), mockUser),
-  updateMe: (payload) => requestWithMock(() => api.put('/users/me', payload), { ...mockUser, ...payload }),
-  dashboard: () => requestWithMock(() => api.get('/dashboard/stats'), mockDashboard),
-  dashboardChecklist: () =>
-    requestWithMock(() => api.get('/dashboard/first-run-checklist'), {
-      completed: 0,
-      total: 1,
-      isComplete: false,
-      items: [
-        {
-          id: 'profile',
-          title: 'Complete your profile',
-          description: 'Connect to the backend to check your real setup progress.',
-          route: '/profile',
-          actionLabel: 'Complete profile',
-          completed: false,
-        },
-      ],
-    }),
-  applications: (status) =>
-    requestWithMock(
-      () => api.get('/applications', { params: { status } }),
-      () => (status ? mockApplications.filter((item) => item.status === status) : mockApplications),
-    ),
-  updateApplicationStatus: (id, status) =>
-    requestWithMock(
-      () => api.patch(`/applications/${id}/status`, { status }),
-      () => mockApplications.find((item) => item.id === id) || mockApplications[0],
-    ),
-  deleteApplication: (id) => requestWithMock(() => api.delete(`/applications/${id}`), null),
-  createApplication: (payload) =>
-    requestWithMock(
-      () => api.post('/applications', payload),
-      () => ({ ...mockApplications[0], id: Date.now(), jobOpportunity: mockOpportunities.find((item) => item.id === payload.jobOpportunityId) || mockOpportunities[0] }),
-    ),
-  opportunities: (params = {}) =>
-    requestWithMock(
-      () => api.get('/job-opportunities', { params }),
-      () =>
-        mockOpportunities.filter((item) => {
-          if (params.type && item.type !== params.type) return false
-          if (params.employmentType && item.employmentType !== params.employmentType) return false
-          return true
-        }),
-    ),
-  companies: (params = {}) => requestWithMock(() => api.get('/companies', { params }), []),
-  saveSharedCompany: (id) =>
-    requestWithMock(() => api.post(`/companies/${id}/save-to-workspace`), {
-      company: { id, name: 'Saved company', isShared: false },
-      opportunitiesCreated: 0,
-      opportunitiesUpdated: 0,
-    }),
-  updateCompany: (id, payload) => requestWithMock(() => api.put(`/companies/${id}`, payload), { id, ...payload }),
-  deleteCompany: (id) => requestWithMock(() => api.delete(`/companies/${id}`), null),
-  exportCompaniesCsv: async () => (await api.get('/companies/export-csv', { responseType: 'blob' })).data,
-  importCompaniesCsv: (formData) =>
-    requestWithMock(() => api.post('/companies/import-csv', formData, { headers: { 'Content-Type': 'multipart/form-data' } }), {
-      created: 0,
-      updated: 0,
-      skipped: 0,
-      errors: [],
-    }),
-  exportOpportunitiesCsv: async () => (await api.get('/job-opportunities/export-csv', { responseType: 'blob' })).data,
-  updateOpportunity: (id, payload) => requestWithMock(() => api.put(`/job-opportunities/${id}`, payload), { id, ...payload }),
-  deleteOpportunity: (id) => requestWithMock(() => api.delete(`/job-opportunities/${id}`), null),
-  deleteAllOpportunities: () =>
-    requestWithMock(() => api.delete('/job-opportunities/clear'), {
-      opportunitiesDeleted: 0,
-      applicationsDeleted: 0,
-      interviewsDeleted: 0,
-    }),
+  getMe: () => requestApi(() => api.get('/users/me')),
+  updateMe: (payload) => requestApi(() => api.put('/users/me', payload), 'Could not update your profile right now.'),
+  dashboard: (params = {}) => requestApi(() => api.get('/dashboard/stats', { params }), 'Could not load dashboard stats.'),
+  dashboardChecklist: () => requestApi(() => api.get('/dashboard/first-run-checklist'), 'Could not load setup checklist.'),
+
+  applications: (status) => requestApi(() => api.get('/applications', { params: { status } }), 'Could not load applications.'),
+  updateApplicationStatus: (id, status) => requestApi(() => api.patch(`/applications/${id}/status`, { status }), 'Could not update application status.'),
+  deleteApplication: (id) => requestApi(() => api.delete(`/applications/${id}`), 'Could not delete this application.'),
+  createApplication: (payload) => requestApi(() => api.post('/applications', payload), 'Could not track this opportunity.'),
+
+  opportunities: (params = {}) => requestApi(() => api.get('/job-opportunities', { params }), 'Could not load opportunities.'),
+  saveSharedOpportunity: (id) => requestApi(() => api.post(`/job-opportunities/${id}/save-to-workspace`), 'Could not save this shared opportunity.'),
+  updateOpportunity: (id, payload) => requestApi(() => api.put(`/job-opportunities/${id}`, payload), 'Could not update this opportunity.'),
+  deleteOpportunity: (id) => requestApi(() => api.delete(`/job-opportunities/${id}`), 'Could not delete this opportunity.'),
+  deleteAllOpportunities: () => requestApi(() => api.delete('/job-opportunities/clear'), 'Could not delete opportunities.'),
+  exportOpportunitiesCsv: () => requestBlob(() => api.get('/job-opportunities/export-csv', { responseType: 'blob' }), 'Could not export Opportunities CSV.'),
   importOpportunitiesCsv: (formData) =>
-    requestWithMock(() => api.post('/job-opportunities/import-csv', formData, { headers: { 'Content-Type': 'multipart/form-data' } }), {
-      created: 0,
-      updated: 0,
-      skipped: 0,
-      errors: [],
-    }),
-  searchAdzunaOpportunities: (params) =>
-    requestWithMock(() => api.get('/job-opportunities/adzuna/search', { params }), {
-      count: 0,
-      country: 'sg',
-      query: params?.what || '',
-      location: params?.where || 'Malaysia',
-      configured: false,
-      message: 'Adzuna is unavailable in mock mode.',
-      opportunities: [],
-    }),
-  adzunaCountries: () =>
-    requestWithMock(() => api.get('/job-opportunities/adzuna/countries'), [
-      { code: 'sg', name: 'Singapore' },
-      { code: 'us', name: 'United States' },
-      { code: 'gb', name: 'United Kingdom' },
-    ]),
-  importAdzunaOpportunities: (payload) =>
-    requestWithMock(() => api.post('/job-opportunities/adzuna/import', payload), {
-      created: 0,
-      updated: 0,
-      skipped: 0,
-      errors: [],
-    }),
-  searchJobDataLakeOpportunities: (params) =>
-    requestWithMock(() => api.get('/job-opportunities/jobdatalake/search', { params }), {
-      count: 0,
-      page: params?.page || 1,
-      perPage: params?.perPage || 20,
-      query: params?.query || '*',
-      country: params?.country || '',
-      configured: false,
-      message: 'JobDataLake is unavailable in mock mode.',
-      opportunities: [],
-    }),
-  importJobDataLakeOpportunities: (payload) =>
-    requestWithMock(() => api.post('/job-opportunities/jobdatalake/import', payload), {
-      created: 0,
-      updated: 0,
-      skipped: 0,
-      errors: [],
-    }),
-  aiSourceOpportunities: (payload) =>
-    requestWithMock(() => api.post('/job-opportunities/ai-source/search', payload), {
-      plan: {
-        what: payload?.prompt || 'intern',
-        where: payload?.country || 'Malaysia',
-        provider: payload?.provider || 'jobdatalake',
-        country: payload?.country || 'MY',
-        reason: 'AI sourcing is unavailable in mock mode.',
-      },
-      search: {
-        count: 0,
-        provider: payload?.provider || 'JobDataLake',
-        country: payload?.country || 'MY',
-        query: payload?.prompt || '',
-        location: 'Malaysia',
-        configured: false,
-        message: 'AI sourcing is unavailable in mock mode.',
-        opportunities: [],
-      },
-      importResult: null,
-    }),
-  importAiSourcedOpportunities: (payload) =>
-    requestWithMock(() => api.post('/job-opportunities/ai-source/import', payload), {
-      plan: {
-        what: payload?.prompt || 'intern',
-        where: payload?.country || 'Malaysia',
-        provider: payload?.provider || 'jobdatalake',
-        country: payload?.country || 'MY',
-        reason: 'AI sourcing is unavailable in mock mode.',
-      },
-      search: {
-        count: 0,
-        provider: payload?.provider || 'JobDataLake',
-        country: payload?.country || 'MY',
-        query: payload?.prompt || '',
-        location: 'Malaysia',
-        configured: false,
-        message: 'AI sourcing is unavailable in mock mode.',
-        opportunities: [],
-      },
-      importResult: { created: 0, updated: 0, skipped: 0, errors: ['AI sourcing is unavailable in mock mode.'] },
-    }),
-  resumes: () => requestWithMock(() => api.get('/resumes'), mockResumes),
-  uploadResume: (formData) =>
-    requestWithMock(
-      () => api.post('/resumes', formData, { headers: { 'Content-Type': 'multipart/form-data' } }),
-      () => ({ id: Date.now(), label: formData.get('label'), fileType: 'pdf', versions: [] }),
-    ),
-  deleteResume: (id) => requestWithMock(() => api.delete(`/resumes/${id}`), null),
-  interviews: () => requestWithMock(() => api.get('/interviews'), mockInterviews),
-  createInterview: (applicationId, payload) =>
-    requestWithMock(() => api.post(`/applications/${applicationId}/interviews`, payload), {
-      id: Date.now(),
-      applicationId,
-      ...payload,
-      type: payload.type || 'Online',
-      createdAt: new Date().toISOString(),
-    }),
-  updateInterview: (id, payload) =>
-    requestWithMock(() => api.put(`/interviews/${id}`, payload), {
-      id,
-      ...payload,
-      type: payload.type || 'Online',
-    }),
-  deleteInterview: (id) => requestWithMock(() => api.delete(`/interviews/${id}`), null),
-  notifications: () => requestWithMock(() => api.get('/notifications'), mockNotifications),
-  aiStatus: () =>
-    requestWithMock(() => api.get('/ai/status'), {
-      provider: 'Gemini',
-      model: 'gemini-2.5-flash',
-      configured: false,
-      mode: 'local-fallback',
-    }),
-  aiPing: () =>
-    requestWithMock(() => api.get('/ai/ping'), {
-      success: false,
-      provider: 'Gemini',
-      model: 'gemini-2.5-flash',
-      mode: 'local-fallback',
-      message: 'Gemini ping is unavailable in mock mode.',
-      reply: null,
-    }),
-  aiUsage: () =>
-    requestWithMock(() => api.get('/ai/usage'), {
-      calls: 0,
-      promptTokens: 0,
-      outputTokens: 0,
-      totalTokens: 0,
-      byFeature: [],
-      recent: [],
-    }),
-  apiUsage: () =>
-    requestWithMock(() => api.get('/usage/apis'), {
-      requests: 0,
-      matched: 0,
-      imported: 0,
-      errors: 0,
-      providers: [],
-    }),
+    requestApi(() => api.post('/job-opportunities/import-csv', formData, { headers: { 'Content-Type': 'multipart/form-data' } }), 'Could not import opportunities CSV.'),
+
+  companies: (params = {}) => requestApi(() => api.get('/companies', { params }), 'Could not load companies.'),
+  saveSharedCompany: (id) => requestApi(() => api.post(`/companies/${id}/save-to-workspace`), 'Could not save this shared company.'),
+  updateCompany: (id, payload) => requestApi(() => api.put(`/companies/${id}`, payload), 'Could not update this company.'),
+  deleteCompany: (id) => requestApi(() => api.delete(`/companies/${id}`), 'Could not delete this company.'),
+  exportCompaniesCsv: () => requestBlob(() => api.get('/companies/export-csv', { responseType: 'blob' }), 'Could not export Companies CSV.'),
+  importCompaniesCsv: (formData) =>
+    requestApi(() => api.post('/companies/import-csv', formData, { headers: { 'Content-Type': 'multipart/form-data' } }), 'Could not import companies CSV.'),
+
+  adzunaCountries: () => requestApi(() => api.get('/job-opportunities/adzuna/countries'), 'Could not load Adzuna countries.'),
+  searchAdzunaOpportunities: (params) => requestApi(() => api.get('/job-opportunities/adzuna/search', { params }), 'Could not search Adzuna right now.'),
+  importAdzunaOpportunities: (payload) => requestApi(() => api.post('/job-opportunities/adzuna/import', payload), 'Could not import Adzuna opportunities.'),
+  searchJobDataLakeOpportunities: (params) => requestApi(() => api.get('/job-opportunities/jobdatalake/search', { params }), 'Could not search JobDataLake right now.'),
+  importJobDataLakeOpportunities: (payload) => requestApi(() => api.post('/job-opportunities/jobdatalake/import', payload), 'Could not import JobDataLake opportunities.'),
+  aiSourceOpportunities: (payload) => requestApi(() => api.post('/job-opportunities/ai-source/search', payload), 'Could not run AI sourcing right now.'),
+  aiSourceCompanies: (payload) => requestApi(() => api.post('/companies/ai-source/search', payload), 'Could not run AI company sourcing right now.'),
+  importAiSourcedOpportunities: (payload) => requestApi(() => api.post('/job-opportunities/ai-source/import', payload), 'Could not import AI-sourced opportunities.'),
+  verifyOpportunityLink: (payload) => requestApi(() => api.post('/job-opportunities/verify-link', payload), 'Could not verify this link right now.'),
+
+  resumes: () => requestApi(() => api.get('/resumes'), 'Could not load resumes.'),
+  uploadResume: (formData) => requestApi(() => api.post('/resumes', formData, { headers: { 'Content-Type': 'multipart/form-data' } }), 'Could not upload this resume.'),
+  deleteResume: (id) => requestApi(() => api.delete(`/resumes/${id}`), 'Could not delete this resume.'),
+
+  interviews: () => requestApi(() => api.get('/interviews'), 'Could not load interviews.'),
+  createInterview: (applicationId, payload) => requestApi(() => api.post(`/applications/${applicationId}/interviews`, payload), 'Could not create this interview.'),
+  updateInterview: (id, payload) => requestApi(() => api.put(`/interviews/${id}`, payload), 'Could not update this interview.'),
+  deleteInterview: (id) => requestApi(() => api.delete(`/interviews/${id}`), 'Could not delete this interview.'),
+
+  notifications: () => requestApi(() => api.get('/notifications'), 'Could not load notifications.'),
+  markNotificationRead: (id) => requestApi(() => api.patch(`/notifications/${id}/read`), 'Could not mark this notification as read.'),
+  markAllNotificationsRead: () => requestApi(() => api.patch('/notifications/read-all'), 'Could not mark notifications as read.'),
+
+  aiStatus: () => requestApi(() => api.get('/ai/status'), 'Could not load AI status.'),
+  aiPing: () => requestApi(() => api.get('/ai/ping'), 'Could not test Gemini right now.'),
+  aiUsage: (params = {}) => requestApi(() => api.get('/ai/usage', { params }), 'Could not load Gemini usage.'),
+  apiUsage: (params = {}) => requestApi(() => api.get('/usage/apis', { params }), 'Could not load external API usage.'),
   aiChat: async (payload) => {
-    const result = await requestWithMock(() => api.post('/ai/chat', payload), {
-      reply:
-        'Your strongest next move is to tailor the resume around measurable React work, then follow up with two companies before their deadlines.',
-    })
+    const result = await requestApi(() => api.post('/ai/chat', payload), 'AI chat is unavailable right now.')
     recordAiUsage('Career chat', payload, result)
     return result
   },
   analyzeResume: async (id) => {
-    const result = await requestWithMock(() => api.post(`/ai/analyze-resume/${id}`), {
-      strengths: ['Clear project experience', 'Strong API integration background', 'Good fit for frontend internships'],
-      weaknesses: ['Few measurable outcomes', 'Skills section could be more targeted'],
-      missingSkills: ['Testing Library', 'Accessibility basics', 'Performance profiling'],
-      suggestions: ['Add metrics to each project', 'Create one AI-tailored version per target company'],
-      overallScore: 82,
-    })
+    const result = await requestApi(() => api.post(`/ai/analyze-resume/${id}`), 'Could not analyze this resume right now.')
     recordAiUsage('Resume analysis', { resumeId: id }, result)
     return result
   },
   coverLetter: async (payload) => {
-    const result = await requestWithMock(() => api.post('/ai/generate-cover-letter', payload), {
-      subject: 'Application for Frontend Developer Intern',
-      coverLetter:
-        'Dear Hiring Team,\n\nI am excited to apply for this opportunity. My experience building React interfaces, integrating REST APIs, and shipping polished student projects aligns well with your team needs.\n\nBest regards,\nAva Mitchell',
-    })
+    const result = await requestApi(() => api.post('/ai/generate-cover-letter', payload), 'Could not generate a cover letter right now.')
     recordAiUsage('Cover letter', payload, result)
     return result
   },
   recommendations: async () => {
-    const result = await requestWithMock(() => api.get('/ai/recommendations'), {
-      summary: 'Your profile is trending toward frontend and AI product roles in Riyadh.',
-      companiesToFollow: ['Mozn', 'STC', 'Tamara'],
-      skillsToLearn: ['Testing Library', 'Dashboard analytics', 'Prompt engineering'],
-      applicationTips: ['Follow up after 5 business days', 'Tailor the first project bullet to each company'],
-    })
+    const result = await requestApi(() => api.get('/ai/recommendations'), 'Could not refresh recommendations right now.')
     recordAiUsage('Recommendations', 'profile context', result)
     return result
   },
-  markNotificationRead: (id) => requestWithMock(() => api.patch(`/notifications/${id}/read`), null),
-  markAllNotificationsRead: () => requestWithMock(() => api.patch('/notifications/read-all'), null),
+
+  adminUsers: (params = {}) => requestApi(() => api.get('/admin/users', { params }), 'Could not load users.'),
+  createAdmin: (payload) => requestApi(() => api.post('/admin/admins', payload), 'Could not create admin account.'),
+  makeAdmin: (id) => requestApi(() => api.post(`/admin/users/${id}/make-admin`), 'Could not grant admin role.'),
+  removeAdmin: (id) => requestApi(() => api.post(`/admin/users/${id}/remove-admin`), 'Could not remove admin role.'),
+  deleteUser: (id) => requestApi(() => api.delete(`/admin/users/${id}`), 'Could not delete this user.'),
+  adminSharedDatabase: () => requestApi(() => api.get('/admin/shared-database'), 'Could not load shared database.'),
+  createSharedCompany: (payload) => requestApi(() => api.post('/admin/shared-companies', payload), 'Could not create shared company.'),
+  updateSharedCompany: (id, payload) => requestApi(() => api.put(`/admin/shared-companies/${id}`, payload), 'Could not update shared company.'),
+  deleteSharedCompany: (id) => requestApi(() => api.delete(`/admin/shared-companies/${id}`), 'Could not delete shared company.'),
+  createSharedOpportunity: (payload) => requestApi(() => api.post('/admin/shared-opportunities', payload), 'Could not create shared opportunity.'),
+  updateSharedOpportunity: (id, payload) => requestApi(() => api.put(`/admin/shared-opportunities/${id}`, payload), 'Could not update shared opportunity.'),
+  deleteSharedOpportunity: (id) => requestApi(() => api.delete(`/admin/shared-opportunities/${id}`), 'Could not delete shared opportunity.'),
+  previewSharedOpportunityNotification: (id) =>
+    requestApi(() => api.post(`/admin/shared-opportunities/${id}/notification-preview`), 'Could not check notification matches.'),
+  previewAllSharedOpportunityNotifications: () =>
+    requestApi(() => api.post('/admin/shared-opportunities/notification-preview-all'), 'Could not check all notification matches.'),
+  notifySharedOpportunity: (id, payload = {}) =>
+    requestApi(() => api.post(`/admin/shared-opportunities/${id}/notify`, payload), 'Could not send opportunity notifications.'),
+
+  resetLocalAiUsage: () => removeScopedStorage('careertrack_ai_usage'),
 }

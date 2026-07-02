@@ -122,6 +122,8 @@ namespace CareerTrackAI.Services
                 Major = user.Major,
                 City = user.City,
                 GraduationYear = user.GraduationYear,
+                CareerObjective = user.CareerObjective,
+                NotificationsEnabled = user.NotificationsEnabled,
                 LastLoginAt = user.LastLoginAt,
                 CreatedAt = user.CreatedAt
             };
@@ -137,6 +139,8 @@ namespace CareerTrackAI.Services
             if (request.Major != null) user.Major = request.Major;
             if (request.City != null) user.City = request.City;
             if (request.GraduationYear.HasValue) user.GraduationYear = request.GraduationYear;
+            if (request.CareerObjective != null) user.CareerObjective = request.CareerObjective;
+            if (request.NotificationsEnabled.HasValue) user.NotificationsEnabled = request.NotificationsEnabled.Value;
 
             user.UpdatedAt = DateTime.UtcNow;
             await _db.SaveChangesAsync();
@@ -147,7 +151,7 @@ namespace CareerTrackAI.Services
     // ==================== DASHBOARD SERVICE ====================
     public interface IDashboardService
     {
-        Task<DashboardStatsResponse> GetStatsAsync(int userId);
+        Task<DashboardStatsResponse> GetStatsAsync(int userId, string activityGrain = "month");
         Task<FirstRunChecklistResponse> GetFirstRunChecklistAsync(int userId);
     }
 
@@ -162,8 +166,9 @@ namespace CareerTrackAI.Services
             _geminiOptions = geminiOptions;
         }
 
-        public async Task<DashboardStatsResponse> GetStatsAsync(int userId)
+        public async Task<DashboardStatsResponse> GetStatsAsync(int userId, string activityGrain = "month")
         {
+            var user = await _db.Users.FirstOrDefaultAsync(u => u.Id == userId);
             var applications = await _db.Applications
                 .Where(a => a.UserId == userId)
                 .Include(a => a.JobOpportunity).ThenInclude(j => j.Company)
@@ -196,25 +201,7 @@ namespace CareerTrackAI.Services
                 .Take(5)
                 .ToListAsync();
 
-            var activityStart = now.Date.AddDays(-21);
-            var activity = Enumerable.Range(0, 4)
-                .Select(index =>
-                {
-                    var from = activityStart.AddDays(index * 7);
-                    var to = index == 3 ? now.Date.AddDays(1) : from.AddDays(7);
-                    return new ApplicationActivityPoint
-                    {
-                        Week = from.ToString("MMM d"),
-                        From = from,
-                        To = to.AddTicks(-1),
-                        Applications = applications.Count(a => a.CreatedAt >= from && a.CreatedAt < to),
-                        Replies = applications.Count(a =>
-                            (a.Status == ApplicationStatus.Accepted || a.Status == ApplicationStatus.Rejected)
-                            && (a.StatusUpdatedAt ?? a.UpdatedAt ?? a.CreatedAt) >= from
-                            && (a.StatusUpdatedAt ?? a.UpdatedAt ?? a.CreatedAt) < to)
-                    };
-                })
-                .ToList();
+            var activity = BuildApplicationActivity(applications, user?.CreatedAt ?? now, now, activityGrain);
 
             return new DashboardStatsResponse
             {
@@ -264,13 +251,68 @@ namespace CareerTrackAI.Services
             };
         }
 
+        private static List<ApplicationActivityPoint> BuildApplicationActivity(List<Models.Application> applications, DateTime createdAt, DateTime now, string grain)
+        {
+            var normalized = (grain ?? "month").Trim().ToLowerInvariant();
+            if (normalized is not ("day" or "month" or "year")) normalized = "month";
+
+            var start = createdAt.Date;
+            var end = now.Date.AddDays(1);
+            if (normalized == "day" && (end - start).TotalDays > 180)
+                start = end.AddDays(-180);
+
+            var points = new List<ApplicationActivityPoint>();
+            for (var cursor = AlignStart(start, normalized); cursor < end;)
+            {
+                var next = NextBucket(cursor, normalized);
+                var label = normalized switch
+                {
+                    "day" => cursor.ToString("MMM d"),
+                    "year" => cursor.ToString("yyyy"),
+                    _ => cursor.ToString("MMM yyyy")
+                };
+
+                points.Add(new ApplicationActivityPoint
+                {
+                    Week = label,
+                    Grain = normalized,
+                    From = cursor,
+                    To = next.AddTicks(-1),
+                    Applications = applications.Count(a => a.CreatedAt >= cursor && a.CreatedAt < next),
+                    Replies = applications.Count(a =>
+                        (a.Status == ApplicationStatus.Accepted || a.Status == ApplicationStatus.Rejected)
+                        && (a.StatusUpdatedAt ?? a.UpdatedAt ?? a.CreatedAt) >= cursor
+                        && (a.StatusUpdatedAt ?? a.UpdatedAt ?? a.CreatedAt) < next)
+                });
+
+                cursor = next;
+            }
+
+            return points;
+        }
+
+        private static DateTime AlignStart(DateTime value, string grain) => grain switch
+        {
+            "year" => new DateTime(value.Year, 1, 1),
+            "month" => new DateTime(value.Year, value.Month, 1),
+            _ => value.Date
+        };
+
+        private static DateTime NextBucket(DateTime value, string grain) => grain switch
+        {
+            "year" => value.AddYears(1),
+            "month" => value.AddMonths(1),
+            _ => value.AddDays(1)
+        };
+
         public async Task<FirstRunChecklistResponse> GetFirstRunChecklistAsync(int userId)
         {
             var user = await _db.Users.FirstOrDefaultAsync(u => u.Id == userId);
             var profileReady = user != null
                 && !string.IsNullOrWhiteSpace(user.FullName)
                 && !string.IsNullOrWhiteSpace(user.Major)
-                && !string.IsNullOrWhiteSpace(user.City);
+                && !string.IsNullOrWhiteSpace(user.City)
+                && !string.IsNullOrWhiteSpace(user.CareerObjective);
 
             var resumeCount = await _db.Resumes.CountAsync(r => r.UserId == userId);
             var companyCount = await _db.Companies.CountAsync(c => c.UserId == userId);
@@ -283,7 +325,7 @@ namespace CareerTrackAI.Services
                 {
                     Id = "profile",
                     Title = "Complete your profile",
-                    Description = "Add your major and city so matching and AI guidance can use real context.",
+                    Description = "Add your major, city, and career focus so matching and AI guidance can use real context.",
                     Route = "/profile",
                     ActionLabel = profileReady ? "Review profile" : "Complete profile",
                     Completed = profileReady
