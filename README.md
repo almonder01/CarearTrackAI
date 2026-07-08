@@ -92,15 +92,6 @@ CareerTrackAI/
 |-- .gitignore
 `-- LICENSE
 ```
-
-## Generated Reports
-
-The final English Word reports are available in:
-
-- `Reports/CareerTrackAI_Project_Completion_Report.docx`
-- `Reports/CareerTrackAI_Feature_Technical_Report.docx`
-- `Reports/CareerTrackAI_Presentation_Brief.docx`
-
 ## Prerequisites
 
 - .NET SDK compatible with the backend target framework
