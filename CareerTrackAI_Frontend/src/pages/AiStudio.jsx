@@ -1,20 +1,8 @@
-import { useEffect, useRef, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { Bot, Copy, FileText, Lightbulb, LoaderCircle, PlugZap, RefreshCw, Send, Sparkles, Trash2 } from 'lucide-react'
-import { careerApi } from '../lib/api.js'
-
-const CHAT_HISTORY_STORAGE_KEY = 'careertrack_ai_chat_history'
-const RECOMMENDATIONS_STORAGE_KEY = 'careertrack_ai_recommendations'
-const COVER_LETTER_STORAGE_KEY = 'careertrack_ai_cover_letter'
-
-function readStoredValue(key, fallback) {
-  try {
-    return JSON.parse(localStorage.getItem(key) || JSON.stringify(fallback))
-  } catch {
-    return fallback
-  }
-}
+import useAiStudioController from './aiStudio/useAiStudioController.js'
+import DismissibleNotice from '../components/DismissibleNotice.jsx'
 
 function friendlyGeminiPingMessage(result) {
   const raw = `${result?.message || ''} ${result?.reply || ''}`.toLowerCase()
@@ -35,81 +23,38 @@ function friendlyGeminiPingMessage(result) {
 }
 
 function AiStudio() {
-  const [message, setMessage] = useState('How can I improve my chances this week?')
-  const [history, setHistory] = useState(() => readStoredValue(CHAT_HISTORY_STORAGE_KEY, []))
-  const [recommendations, setRecommendations] = useState(() => readStoredValue(RECOMMENDATIONS_STORAGE_KEY, null))
-  const [coverLetter, setCoverLetter] = useState(() => readStoredValue(COVER_LETTER_STORAGE_KEY, null))
-  const [aiStatus, setAiStatus] = useState(null)
-  const [pingResult, setPingResult] = useState(null)
-  const [loading, setLoading] = useState(false)
-  const [loadingRecommendations, setLoadingRecommendations] = useState(false)
-  const [pinging, setPinging] = useState(false)
-  const messagesEndRef = useRef(null)
-
-  useEffect(() => {
-    careerApi.aiStatus().then(setAiStatus).catch(() => null)
-  }, [])
-
-  useEffect(() => {
-    localStorage.setItem(CHAT_HISTORY_STORAGE_KEY, JSON.stringify(history))
-  }, [history])
-
-  useEffect(() => {
-    if (recommendations) localStorage.setItem(RECOMMENDATIONS_STORAGE_KEY, JSON.stringify(recommendations))
-  }, [recommendations])
-
-  useEffect(() => {
-    if (coverLetter) localStorage.setItem(COVER_LETTER_STORAGE_KEY, JSON.stringify(coverLetter))
-  }, [coverLetter])
-
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' })
-  }, [history, loading])
-
-  async function refreshRecommendations() {
-    setLoadingRecommendations(true)
-    try {
-      const result = await careerApi.recommendations()
-      setRecommendations(result)
-    } finally {
-      setLoadingRecommendations(false)
-    }
-  }
-
-  function clearChat() {
-    setHistory([])
-    localStorage.removeItem(CHAT_HISTORY_STORAGE_KEY)
-  }
-
-  async function sendMessage(event) {
-    event.preventDefault()
-    if (!message.trim()) return
-    const nextHistory = [...history, { role: 'user', content: message }]
-    setHistory(nextHistory)
-    setMessage('')
-    setLoading(true)
-    try {
-      const response = await careerApi.aiChat({ message, history: nextHistory })
-      setHistory([...nextHistory, { role: 'model', content: response.reply }])
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  async function generateCoverLetter() {
-    setCoverLetter(await careerApi.coverLetter({ jobOpportunityId: 11, resumeId: 1, additionalNotes: 'Make it concise and confident.' }))
-  }
-
-  async function pingGemini() {
-    setPinging(true)
-    setPingResult(null)
-    try {
-      setPingResult(await careerApi.aiPing())
-    } finally {
-      setPinging(false)
-    }
-  }
-
+  const {
+    message,
+    setMessage,
+    history,
+    recommendations,
+    coverLetter,
+    aiStatus,
+    pingResult,
+    applications,
+    resumes,
+    selectedApplicationId,
+    setSelectedApplicationId,
+    selectedResumeId,
+    setSelectedResumeId,
+    coverNotes,
+    setCoverNotes,
+    coverLoading,
+    coverMessage,
+    clearCoverMessage,
+    copied,
+    loading,
+    loadingRecommendations,
+    pinging,
+    clearPingResult,
+    messagesEndRef,
+    refreshRecommendations,
+    clearChat,
+    sendMessage,
+    generateCoverLetter,
+    copyCoverLetter,
+    pingGemini,
+  } = useAiStudioController()
   return (
     <div className="grid gap-6 xl:grid-cols-[1fr_380px]">
       <section className="card flex h-[720px] min-h-0 flex-col">
@@ -229,15 +174,16 @@ function AiStudio() {
             )}
             <button type="button" onClick={pingGemini} disabled={pinging} className="btn-secondary mt-4 w-full">
               {pinging ? <LoaderCircle className="animate-spin" size={17} /> : <PlugZap size={17} />}
-              {pinging ? 'Checking token...' : 'Test Gemini token'}
+              {pinging ? 'Checking connection...' : 'Test Gemini Connection'}
             </button>
             {pingResult && (
-              <div
-                className={`mt-3 rounded-lg border p-3 text-sm font-semibold ${
+              <DismissibleNotice
+                className={`mt-3 text-sm font-semibold ${
                   pingResult.success
                     ? 'border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-200'
                     : 'border-amber-200 bg-amber-50 text-amber-900 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-200'
                 }`}
+                onDismiss={clearPingResult}
               >
                 {friendlyGeminiPingMessage(pingResult)}
                 {!pingResult.success && pingResult.reply && (
@@ -247,7 +193,7 @@ function AiStudio() {
                   </details>
                 )}
                 {pingResult.success && pingResult.reply && <span className="mt-1 block font-mono text-xs">Reply: {pingResult.reply}</span>}
-              </div>
+              </DismissibleNotice>
             )}
           </section>
         )}
@@ -257,19 +203,61 @@ function AiStudio() {
             <FileText className="text-amber-500" />
             <h3 className="font-bold text-slate-950 dark:text-white">Cover letter generator</h3>
           </div>
-          <p className="text-sm leading-6 text-slate-500 dark:text-slate-400">Generate a draft from selected opportunity and resume context.</p>
-          <button onClick={generateCoverLetter} className="btn-secondary mt-4 w-full">
-            <Sparkles size={17} />
-            Generate sample
+          <p className="text-sm leading-6 text-slate-500 dark:text-slate-400">Generate a draft from one tracked application and an optional resume.</p>
+          <div className="mt-4 space-y-3">
+            <label className="block">
+              <span className="label">Application</span>
+              <select className="input mt-2" value={selectedApplicationId} onChange={(event) => setSelectedApplicationId(event.target.value)}>
+                {applications.length === 0 && <option value="">No tracked applications</option>}
+                {applications.map((application) => (
+                  <option key={application.id} value={application.id}>
+                    {application.jobOpportunity?.title || 'Application'} at {application.jobOpportunity?.company?.name || 'Company'}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="block">
+              <span className="label">Resume</span>
+              <select className="input mt-2" value={selectedResumeId} onChange={(event) => setSelectedResumeId(event.target.value)}>
+                <option value="">No resume context</option>
+                {resumes.map((resume) => (
+                  <option key={resume.id} value={resume.id}>
+                    {resume.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="block">
+              <span className="label">Tone and notes</span>
+              <textarea
+                className="input mt-2 min-h-24 resize-y"
+                value={coverNotes}
+                onChange={(event) => setCoverNotes(event.target.value)}
+                placeholder="Mention tone, strengths, or specific skills to emphasize."
+              />
+            </label>
+          </div>
+          <button onClick={generateCoverLetter} disabled={coverLoading || applications.length === 0} className="btn-secondary mt-4 w-full">
+            {coverLoading ? <LoaderCircle className="animate-spin" size={17} /> : <Sparkles size={17} />}
+            {coverLoading ? 'Generating...' : 'Generate cover letter'}
           </button>
+          {coverMessage && (
+            <DismissibleNotice
+              className="mt-3 border-teal-200 bg-teal-50 text-sm font-semibold text-teal-800 dark:border-teal-800 dark:bg-teal-950/50 dark:text-teal-100"
+              onDismiss={clearCoverMessage}
+            >
+              {coverMessage}
+            </DismissibleNotice>
+          )}
           {coverLetter && (
             <div className="mt-4 rounded-lg bg-slate-50 p-4 dark:bg-slate-950">
               <div className="mb-2 flex items-center justify-between">
                 <p className="font-bold text-slate-950 dark:text-white">{coverLetter.subject}</p>
-                <button className="rounded-md p-1 text-slate-500 hover:bg-white">
+                <button type="button" onClick={copyCoverLetter} className="rounded-md p-1 text-slate-500 hover:bg-white dark:hover:bg-slate-900" title="Copy cover letter">
                   <Copy size={15} />
                 </button>
               </div>
+              {copied && <p className="mb-2 text-xs font-bold text-emerald-700 dark:text-emerald-300">Copied</p>}
               <pre className="whitespace-pre-wrap text-sm leading-6 text-slate-600 dark:text-slate-300">{coverLetter.coverLetter}</pre>
             </div>
           )}

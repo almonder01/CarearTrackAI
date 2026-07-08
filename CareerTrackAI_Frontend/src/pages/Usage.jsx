@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import { Activity, DatabaseZap, Gauge, Layers3, RotateCcw, Sparkles } from 'lucide-react'
 import { careerApi } from '../lib/api.js'
+import { readScopedJson } from '../lib/userStorage.js'
 
 const FREE_TOKEN_LIMIT = 100000
 
@@ -10,6 +11,12 @@ const usageTabs = [
   ['gemini', 'Gemini'],
   ['adzuna', 'Adzuna'],
   ['jobdatalake', 'JobDataLake'],
+]
+
+const usageGrains = [
+  ['day', 'Day'],
+  ['month', 'Month'],
+  ['year', 'Year'],
 ]
 
 function MetricCard({ label, value, Icon = Activity }) {
@@ -28,19 +35,45 @@ function MetricCard({ label, value, Icon = Activity }) {
   )
 }
 
-function UsageChart({ title, data, emptyText = 'No usage recorded yet.' }) {
+function GrainSelector({ value, onChange }) {
+  return (
+    <div className="flex gap-1 rounded-lg border border-slate-200 bg-slate-50 p-1 dark:border-slate-800 dark:bg-slate-950">
+      {usageGrains.map(([id, label]) => (
+        <button
+          key={id}
+          type="button"
+          onClick={() => onChange(id)}
+          className={`rounded-md px-3 py-1.5 text-xs font-bold transition ${
+            value === id
+              ? 'bg-slate-950 text-white dark:bg-teal-400 dark:text-slate-950'
+              : 'text-slate-600 hover:bg-white dark:text-slate-300 dark:hover:bg-slate-900'
+          }`}
+        >
+          {label}
+        </button>
+      ))}
+    </div>
+  )
+}
+
+function UsageChart({ title, data = [], emptyText = 'No usage recorded yet.', actions = null }) {
+  const hasData = data.some((item) => Number(item.value || 0) > 0)
+
   return (
     <div className="card">
-      <div className="mb-5">
-        <p className="label">Usage analysis</p>
-        <h2 className="text-xl font-bold text-slate-950 dark:text-white">{title}</h2>
+      <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <p className="label">Usage analysis</p>
+          <h2 className="text-xl font-bold text-slate-950 dark:text-white">{title}</h2>
+        </div>
+        {actions}
       </div>
       <div className="h-72">
-        {data.length ? (
+        {hasData ? (
           <ResponsiveContainer width="100%" height="100%">
             <BarChart data={data}>
               <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="currentColor" className="text-slate-200 dark:text-slate-800" />
-              <XAxis dataKey="name" tickLine={false} axisLine={false} tick={{ fill: 'currentColor', fontSize: 12 }} className="text-slate-500 dark:text-slate-400" />
+              <XAxis dataKey="name" minTickGap={20} tickLine={false} axisLine={false} tick={{ fill: 'currentColor', fontSize: 12 }} className="text-slate-500 dark:text-slate-400" />
               <YAxis tickLine={false} axisLine={false} tick={{ fill: 'currentColor', fontSize: 12 }} className="text-slate-500 dark:text-slate-400" />
               <Tooltip
                 cursor={{ fill: 'rgba(20, 184, 166, 0.08)' }}
@@ -64,19 +97,35 @@ function UsageChart({ title, data, emptyText = 'No usage recorded yet.' }) {
   )
 }
 
-function ProviderPanel({ provider }) {
+function ProviderPanel({ provider, usageGrain, onGrainChange }) {
   const recent = provider?.recent || []
+  const timelineData = (provider?.timeline || []).map((item) => ({
+    name: item.label,
+    value: item.requests,
+    matched: item.matched,
+    imported: item.imported,
+    errors: item.errors,
+  }))
+
   return (
     <section className="grid gap-6 xl:grid-cols-[1fr_340px]">
-      <UsageChart
-        title={`${provider?.provider || 'Provider'} requests and results`}
-        data={[
-          { name: 'Requests', value: provider?.requests || 0 },
-          { name: 'Matched', value: provider?.matched || 0 },
-          { name: 'Imported', value: provider?.imported || 0 },
-          { name: 'Errors', value: provider?.errors || 0 },
-        ].filter((item) => item.value > 0)}
-      />
+      <div className="space-y-6">
+        <UsageChart
+          title={`${provider?.provider || 'Provider'} requests by ${usageGrain}`}
+          data={timelineData}
+          emptyText="Run a provider search or import to start this timeline."
+          actions={<GrainSelector value={usageGrain} onChange={onGrainChange} />}
+        />
+        <UsageChart
+          title={`${provider?.provider || 'Provider'} requests and results`}
+          data={[
+            { name: 'Requests', value: provider?.requests || 0 },
+            { name: 'Matched', value: provider?.matched || 0 },
+            { name: 'Imported', value: provider?.imported || 0 },
+            { name: 'Errors', value: provider?.errors || 0 },
+          ].filter((item) => item.value > 0)}
+        />
+      </div>
       <aside className="rounded-lg border border-slate-200 bg-white p-5 dark:border-slate-800 dark:bg-slate-900">
         <p className="label">Recent activity</p>
         <div className="mt-4 space-y-3">
@@ -104,11 +153,12 @@ function ProviderPanel({ provider }) {
 
 function Usage() {
   const [activeTab, setActiveTab] = useState('overview')
+  const [usageGrain, setUsageGrain] = useState('day')
   const [geminiUsage, setGeminiUsage] = useState(null)
   const [apiUsage, setApiUsage] = useState(null)
   const [loading, setLoading] = useState(true)
 
-  const localUsage = useMemo(() => JSON.parse(localStorage.getItem('careertrack_ai_usage') || '[]'), [])
+  const localUsage = useMemo(() => readScopedJson('careertrack_ai_usage', []), [])
   const localTotals = localUsage.reduce(
     (acc, item) => {
       const total = (item.inputTokens || 0) + (item.outputTokens || 0)
@@ -129,10 +179,20 @@ function Usage() {
     name: item.feature,
     value: item.totalTokens,
   }))
+  const geminiTimelineData = (geminiUsage?.timeline || [])
+    .map((item) => ({
+      name: item.label,
+      value: item.totalTokens,
+      calls: item.calls,
+      promptTokens: item.promptTokens,
+      outputTokens: item.outputTokens,
+    }))
+  const usageStartedAt = geminiUsage?.startedAt ? new Date(geminiUsage.startedAt).toLocaleDateString() : 'your account creation date'
 
   useEffect(() => {
     let mounted = true
-    Promise.all([careerApi.aiUsage().catch(() => null), careerApi.apiUsage().catch(() => null)])
+    setLoading(true)
+    Promise.all([careerApi.aiUsage({ grain: usageGrain }).catch(() => null), careerApi.apiUsage({ grain: usageGrain }).catch(() => null)])
       .then(([gemini, apis]) => {
         if (!mounted) return
         setGeminiUsage(gemini)
@@ -145,10 +205,10 @@ function Usage() {
     return () => {
       mounted = false
     }
-  }, [])
+  }, [usageGrain])
 
   function resetUsage() {
-    localStorage.removeItem('careertrack_ai_usage')
+    careerApi.resetLocalAiUsage()
     window.location.reload()
   }
 
@@ -184,7 +244,13 @@ function Usage() {
             <MetricCard label="Free estimate left" value={remaining.toLocaleString()} Icon={Gauge} />
           </section>
           <UsageChart
-            title="Provider activity"
+            title={`Gemini token usage by ${usageGrain}`}
+            data={geminiTimelineData}
+            emptyText="Run a live Gemini request to start the timeline."
+            actions={<GrainSelector value={usageGrain} onChange={setUsageGrain} />}
+          />
+          <UsageChart
+            title="External provider activity"
             data={[
               { name: 'Gemini tokens', value: geminiUsage?.totalTokens || 0 },
               { name: 'Adzuna requests', value: adzunaUsage?.requests || 0 },
@@ -196,9 +262,18 @@ function Usage() {
 
       {activeTab === 'gemini' && (
         <section className="grid gap-6 xl:grid-cols-[1fr_340px]">
-          <UsageChart title="Gemini usage by feature" data={geminiChartData} emptyText="Run a live Gemini request to start metering tokens." />
+          <div className="space-y-6">
+            <UsageChart
+              title={`Gemini tokens by ${usageGrain}`}
+              data={geminiTimelineData}
+              emptyText="Run a live Gemini request to start metering tokens."
+              actions={<GrainSelector value={usageGrain} onChange={setUsageGrain} />}
+            />
+            <UsageChart title="Gemini usage by feature" data={geminiChartData} emptyText="No feature usage has been recorded yet." />
+          </div>
           <aside className="rounded-lg border border-teal-200 bg-teal-50 p-5 dark:border-teal-800 dark:bg-teal-950/60">
             <p className="label">Gemini metering</p>
+            <p className="mt-2 text-sm leading-6 text-teal-800 dark:text-teal-200">Timeline starts from {usageStartedAt} and uses server-side usage logs.</p>
             <dl className="mt-5 space-y-3 text-sm">
               <div className="flex items-center justify-between gap-3">
                 <dt className="text-teal-800 dark:text-teal-200">Calls</dt>
@@ -225,8 +300,20 @@ function Usage() {
         </section>
       )}
 
-      {activeTab === 'adzuna' && <ProviderPanel provider={adzunaUsage || { provider: 'Adzuna', requests: 0, matched: 0, imported: 0, errors: 0, recent: [] }} />}
-      {activeTab === 'jobdatalake' && <ProviderPanel provider={jobDataLakeUsage || { provider: 'JobDataLake', requests: 0, matched: 0, imported: 0, errors: 0, recent: [] }} />}
+      {activeTab === 'adzuna' && (
+        <ProviderPanel
+          provider={adzunaUsage || { provider: 'Adzuna', requests: 0, matched: 0, imported: 0, errors: 0, recent: [], timeline: [] }}
+          usageGrain={usageGrain}
+          onGrainChange={setUsageGrain}
+        />
+      )}
+      {activeTab === 'jobdatalake' && (
+        <ProviderPanel
+          provider={jobDataLakeUsage || { provider: 'JobDataLake', requests: 0, matched: 0, imported: 0, errors: 0, recent: [], timeline: [] }}
+          usageGrain={usageGrain}
+          onGrainChange={setUsageGrain}
+        />
+      )}
     </div>
   )
 }

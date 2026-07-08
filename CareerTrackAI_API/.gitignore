@@ -21,6 +21,9 @@ publish/
 ## Logs
 *.log
 
+## Runtime uploads
+wwwroot/uploads/
+
 ## App settings (لو فيه بيانات حساسة)
 appsettings.Development.json
 appsettings.Production.json
@@ -38,9 +41,6 @@ packages/
 
 ## ASP.NET Scaffolding
 ScaffoldingReadMe.txt
-
-## Entity Framework
-Migrations/*Snapshot.cs
 
 ## Test results
 TestResults/

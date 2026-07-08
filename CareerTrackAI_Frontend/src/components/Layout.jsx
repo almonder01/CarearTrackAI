@@ -1,5 +1,4 @@
-import { useEffect, useState } from 'react'
-import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
+import { NavLink, Outlet } from 'react-router-dom'
 import {
   Bell,
   Bot,
@@ -7,21 +6,23 @@ import {
   CalendarDays,
   FileText,
   Database,
+  CircleHelp,
   LayoutDashboard,
   LogOut,
   PanelLeftClose,
   PanelLeftOpen,
   Search,
   Settings,
-  Sparkles,
+  ShieldCheck,
   Activity,
   UserRound,
   Workflow,
   X,
 } from 'lucide-react'
 import clsx from 'clsx'
-import { useAuth } from '../context/useAuth.js'
-import { careerApi } from '../lib/api.js'
+import BrandMark from './BrandMark.jsx'
+import FloatingAiAgent from './FloatingAiAgent.jsx'
+import useLayoutController from './layout/useLayoutController.js'
 
 const navItems = [
   { to: '/', label: 'Dashboard', icon: LayoutDashboard },
@@ -34,131 +35,38 @@ const navItems = [
   { to: '/profile', label: 'Profile', icon: UserRound },
   { to: '/usage', label: 'Usage', icon: Activity },
   { to: '/settings', label: 'Settings', icon: Settings },
+  { to: '/admin', label: 'Admin', icon: ShieldCheck, adminOnly: true },
+  { to: '/help', label: 'Help', icon: CircleHelp },
 ]
 
-const pageTitles = {
-  '/': ['Dashboard', 'Your career search command center'],
-  '/applications': ['Applications', 'Move every opportunity through a focused pipeline'],
-  '/opportunities': ['Opportunities', 'Explore internships and jobs with AI-ready context'],
-  '/resumes': ['Resumes', 'Manage original CVs and tailored AI versions'],
-  '/interviews': ['Interviews', 'Keep preparation, links, and timing in one place'],
-  '/ai-studio': ['AI Studio', 'Turn your data into tailored career actions'],
-  '/data-hub': ['Data Hub', 'Import, enrich, and export company intelligence'],
-  '/profile': ['Profile', 'Keep your matching signals fresh'],
-  '/usage': ['Usage', 'Track AI consumption and remaining credits'],
-  '/settings': ['Settings', 'Plan, payments, and AI provider configuration'],
-  '/checkout': ['Checkout', 'Complete plan and payment setup'],
+function roleLabel(role) {
+  return role === 'Student' ? 'User' : role || 'User'
 }
 
 function Layout() {
-  const { user, logout } = useAuth()
-  const navigate = useNavigate()
-  const location = useLocation()
-  const [notifications, setNotifications] = useState({ notifications: [], unreadCount: 0 })
-  const [notificationsOpen, setNotificationsOpen] = useState(false)
-  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(() => localStorage.getItem('careertrack_sidebar_collapsed') === 'true')
-  const [showCopilot, setShowCopilot] = useState(
-    () => localStorage.getItem('careertrack_show_copilot') !== 'false' && localStorage.getItem('careertrack_copilot_closed') !== 'true',
-  )
-  const [density, setDensity] = useState(() => localStorage.getItem('careertrack_density') || 'Comfortable')
-  const [searchTerm, setSearchTerm] = useState('')
-  const [searchResults, setSearchResults] = useState([])
-  const [searchOpen, setSearchOpen] = useState(false)
-
-  useEffect(() => {
-    careerApi.notifications().then(setNotifications).catch(() => null)
-  }, [])
-
-  useEffect(() => {
-    const query = searchTerm.trim().toLowerCase()
-    if (query.length < 2) {
-      setSearchResults([])
-      setSearchOpen(false)
-      return undefined
-    }
-
-    const timer = setTimeout(async () => {
-      const [companies, opportunities, applications] = await Promise.all([
-        careerApi.companies().catch(() => []),
-        careerApi.opportunities().catch(() => []),
-        careerApi.applications().catch(() => []),
-      ])
-      const companyMatches = companies
-        .filter((item) => `${item.name} ${item.industry} ${item.city} ${item.country}`.toLowerCase().includes(query))
-        .slice(0, 4)
-        .map((item) => ({ id: `company-${item.id}`, label: item.name, meta: item.industry || item.city || 'Company', to: '/data-hub' }))
-      const opportunityMatches = opportunities
-        .filter((item) => `${item.title} ${item.company?.name} ${item.location} ${item.requiredSkills}`.toLowerCase().includes(query))
-        .slice(0, 4)
-        .map((item) => ({ id: `opportunity-${item.id}`, label: item.title, meta: item.company?.name || 'Opportunity', to: '/opportunities' }))
-      const applicationMatches = applications
-        .filter((item) => `${item.jobOpportunity?.title} ${item.jobOpportunity?.company?.name} ${item.status} ${item.notes}`.toLowerCase().includes(query))
-        .slice(0, 4)
-        .map((item) => ({ id: `application-${item.id}`, label: item.jobOpportunity?.title || 'Application', meta: `Application ${item.status}`, to: '/applications' }))
-      setSearchResults([...companyMatches, ...opportunityMatches, ...applicationMatches].slice(0, 8))
-      setSearchOpen(true)
-    }, 250)
-
-    return () => clearTimeout(timer)
-  }, [searchTerm])
-
-  useEffect(() => {
-    const theme = localStorage.getItem('careertrack_theme') || 'System'
-    const prefersDark = window.matchMedia?.('(prefers-color-scheme: dark)').matches
-    document.documentElement.classList.toggle('dark', theme === 'Dark' || (theme === 'System' && prefersDark))
-  }, [location.pathname])
-
-  useEffect(() => {
-    function syncPreferences() {
-      setDensity(localStorage.getItem('careertrack_density') || 'Comfortable')
-      setShowCopilot(localStorage.getItem('careertrack_show_copilot') !== 'false' && localStorage.getItem('careertrack_copilot_closed') !== 'true')
-    }
-
-    window.addEventListener('storage', syncPreferences)
-    window.addEventListener('careertrack_preferences_changed', syncPreferences)
-    return () => {
-      window.removeEventListener('storage', syncPreferences)
-      window.removeEventListener('careertrack_preferences_changed', syncPreferences)
-    }
-  }, [])
-
-  const titleKey = location.pathname.startsWith('/checkout') ? '/checkout' : location.pathname
-  const [title, subtitle] = pageTitles[titleKey] || pageTitles['/']
-
-  function toggleSidebar() {
-    const next = !isSidebarCollapsed
-    setIsSidebarCollapsed(next)
-    localStorage.setItem('careertrack_sidebar_collapsed', String(next))
-  }
-
-  function closeCopilot() {
-    setShowCopilot(false)
-    localStorage.setItem('careertrack_copilot_closed', 'true')
-  }
-
-  async function markNotificationRead(notification) {
-    setNotifications((current) => ({
-      unreadCount: Math.max(0, current.unreadCount - (notification.isRead ? 0 : 1)),
-      notifications: current.notifications.map((item) => (item.id === notification.id ? { ...item, isRead: true } : item)),
-    }))
-    await careerApi.markNotificationRead(notification.id).catch(() => null)
-    setNotificationsOpen(false)
-    if (notification.link) navigate(notification.link)
-  }
-
-  async function markAllNotificationsRead() {
-    setNotifications((current) => ({
-      unreadCount: 0,
-      notifications: current.notifications.map((item) => ({ ...item, isRead: true })),
-    }))
-    await careerApi.markAllNotificationsRead().catch(() => null)
-  }
-
-  async function handleLogout() {
-    await logout()
-    navigate('/login')
-  }
-
+  const {
+    user,
+    navigate,
+    notifications,
+    notificationsOpen,
+    setNotificationsOpen,
+    isSidebarCollapsed,
+    showCopilot,
+    density,
+    searchTerm,
+    setSearchTerm,
+    searchResults,
+    searchOpen,
+    setSearchOpen,
+    isAdmin,
+    title,
+    subtitle,
+    toggleSidebar,
+    closeCopilot,
+    markNotificationRead,
+    markAllNotificationsRead,
+    handleLogout,
+  } = useLayoutController()
   return (
     <div
       className={clsx(
@@ -173,14 +81,8 @@ function Layout() {
           isSidebarCollapsed ? 'w-24' : 'w-72',
         )}
       >
-        <div className={clsx('mb-5 flex shrink-0 items-center gap-3 px-2', isSidebarCollapsed && 'justify-center px-0')}>
-          <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-slate-950 text-white">
-            <Sparkles size={22} />
-          </div>
-          <div className={clsx(isSidebarCollapsed && 'hidden')}>
-            <p className="text-base font800 font-bold tracking-tight">CareerTrack AI</p>
-            <p className="text-xs text-slate-500">Smart career operating system</p>
-          </div>
+        <div className="mb-5 shrink-0 px-2">
+          <BrandMark compact={isSidebarCollapsed} />
         </div>
 
         <button
@@ -193,7 +95,7 @@ function Layout() {
         </button>
 
         <nav className="min-h-0 flex-1 space-y-1 overflow-y-auto pr-1">
-          {navItems.map(({ to, label, icon: Icon }) => (
+          {navItems.filter((item) => !item.adminOnly || isAdmin).map(({ to, label, icon: Icon }) => (
             <NavLink
               key={to}
               to={to}
@@ -328,8 +230,8 @@ function Layout() {
                   {user?.fullName?.slice(0, 1) || 'U'}
                 </div>
                 <div className="hidden text-left sm:block">
-                  <p className="text-sm font-bold text-slate-900 dark:text-slate-100">{user?.fullName || 'Student'}</p>
-                  <p className="text-xs text-slate-500 dark:text-slate-400">{user?.role || 'Student'}</p>
+                  <p className="text-sm font-bold text-slate-900 dark:text-slate-100">{user?.fullName || 'User'}</p>
+                  <p className="text-xs text-slate-500 dark:text-slate-400">{roleLabel(user?.role)}</p>
                 </div>
               </div>
               <button onClick={handleLogout} className="btn-secondary" title="Log out">
@@ -343,6 +245,7 @@ function Layout() {
           <Outlet />
         </div>
       </main>
+      <FloatingAiAgent />
     </div>
   )
 }

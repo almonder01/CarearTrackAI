@@ -59,6 +59,7 @@ namespace CareerTrackAI.Enums
         DeadlineReminder = 1,
         InterviewReminder = 2,
         StatusUpdate = 3,
-        AIRecommendation = 4
+        AIRecommendation = 4,
+        OpportunityAlert = 5
     }
 }

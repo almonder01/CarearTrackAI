@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.IdentityModel.Tokens;
 using System.Text;
+using System.Threading.RateLimiting;
 using CareerTrackAI.Data;
 using CareerTrackAI.Services;
 
@@ -36,6 +37,34 @@ builder.Services.AddAuthentication(options =>
 });
 
 builder.Services.AddAuthorization();
+
+// ==================== RATE LIMITING ====================
+builder.Services.AddRateLimiter(options =>
+{
+    options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+    options.GlobalLimiter = PartitionedRateLimiter.Create<HttpContext, string>(context =>
+    {
+        var userKey = context.User?.Identity?.IsAuthenticated == true
+            ? context.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value
+            : null;
+        var partitionKey = userKey ?? context.Connection.RemoteIpAddress?.ToString() ?? "anonymous";
+
+        return RateLimitPartition.GetFixedWindowLimiter(partitionKey, _ => new FixedWindowRateLimiterOptions
+        {
+            PermitLimit = 240,
+            Window = TimeSpan.FromMinutes(1),
+            QueueLimit = 80,
+            QueueProcessingOrder = QueueProcessingOrder.OldestFirst
+        });
+    });
+    options.OnRejected = async (context, cancellationToken) =>
+    {
+        context.HttpContext.Response.ContentType = "application/json";
+        await context.HttpContext.Response.WriteAsync(
+            "{\"success\":false,\"message\":\"Too many requests. Please wait a moment and try again.\"}",
+            cancellationToken);
+    };
+});
 
 // ==================== CORS ====================
 builder.Services.AddCors(options =>
@@ -107,6 +136,12 @@ builder.Services.AddHttpClient("JobDataLake", client =>
 
 builder.Services.AddSingleton(jobDataLakeOptions);
 
+builder.Services.AddHttpClient("LinkVerifier", client =>
+{
+    client.Timeout = TimeSpan.FromSeconds(10);
+    client.DefaultRequestHeaders.UserAgent.ParseAdd("CareerTrackAI-LinkVerifier/1.0");
+});
+
 builder.Services.AddSingleton(new GeminiOptions
 {
     ModelId = geminiModel,
@@ -114,8 +149,8 @@ builder.Services.AddSingleton(new GeminiOptions
 });
 
 // ==================== SERVICES ====================
-builder.Services.AddSingleton<IGeminiUsageTracker, InMemoryGeminiUsageTracker>();
-builder.Services.AddSingleton<IApiUsageTracker, InMemoryApiUsageTracker>();
+builder.Services.AddScoped<IGeminiUsageTracker, DbGeminiUsageTracker>();
+builder.Services.AddScoped<IApiUsageTracker, DbApiUsageTracker>();
 builder.Services.AddScoped<IAiService, AiService>();
 builder.Services.AddScoped<IAuthService, AuthService>();
 builder.Services.AddScoped<IUserService, UserService>();
@@ -131,6 +166,8 @@ builder.Services.AddScoped<IDataImportExportService, DataImportExportService>();
 builder.Services.AddScoped<IAdzunaJobImportService, AdzunaJobImportService>();
 builder.Services.AddScoped<IJobDataLakeImportService, JobDataLakeImportService>();
 builder.Services.AddScoped<IAiSourcingService, AiSourcingService>();
+builder.Services.AddScoped<ILinkVerificationService, LinkVerificationService>();
+builder.Services.AddScoped<IAdminService, AdminService>();
 
 // ==================== BUILD ====================
 var app = builder.Build();
@@ -143,11 +180,47 @@ if (app.Environment.IsDevelopment())
 app.UseHttpsRedirection();
 app.UseCors("FrontendPolicy");
 app.UseAuthentication();
+app.UseRateLimiter();
 app.UseAuthorization();
 app.UseStaticFiles();
 app.MapControllers();
 
+await BootstrapAdminAsync(app);
+
 app.Run();
+
+static async Task BootstrapAdminAsync(WebApplication app)
+{
+    var email = app.Configuration["AdminBootstrap:Email"]?.Trim().ToLower();
+    var password = app.Configuration["AdminBootstrap:Password"];
+    var fullName = app.Configuration["AdminBootstrap:FullName"] ?? "CareerTrackAI Admin";
+    if (string.IsNullOrWhiteSpace(email) || string.IsNullOrWhiteSpace(password)) return;
+
+    using var scope = app.Services.CreateScope();
+    var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+    var user = await db.Users.IgnoreQueryFilters().FirstOrDefaultAsync(item => item.Email == email);
+    if (user == null)
+    {
+        db.Users.Add(new CareerTrackAI.Models.User
+        {
+            FullName = fullName,
+            Email = email,
+            PasswordHash = BCrypt.Net.BCrypt.HashPassword(password),
+            Role = CareerTrackAI.Enums.UserRole.Admin
+        });
+    }
+    else
+    {
+        user.IsDeleted = false;
+        user.DeletedAt = null;
+        user.Role = CareerTrackAI.Enums.UserRole.Admin;
+        if (!BCrypt.Net.BCrypt.Verify(password, user.PasswordHash))
+            user.PasswordHash = BCrypt.Net.BCrypt.HashPassword(password);
+        user.UpdatedAt = DateTime.UtcNow;
+    }
+
+    await db.SaveChangesAsync();
+}
 
 public class GeminiOptions
 {

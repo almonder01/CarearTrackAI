@@ -1,135 +1,46 @@
-import { useEffect, useMemo, useState } from 'react'
-import { Building2, CheckCircle2, CloudDownload, DatabaseZap, ExternalLink, LoaderCircle, MapPin, ShieldCheck, SlidersHorizontal, Trash2 } from 'lucide-react'
+import { AlertTriangle, Building2, CheckCircle2, CloudDownload, DatabaseZap, Download, ExternalLink, LoaderCircle, MapPin, ShieldCheck, SlidersHorizontal, Trash2, X } from 'lucide-react'
 import dayjs from 'dayjs'
-import { careerApi } from '../lib/api.js'
 import AiActionPanel from '../components/AiActionPanel.jsx'
+import DismissibleNotice from '../components/DismissibleNotice.jsx'
+import useOpportunitiesController from './opportunities/useOpportunitiesController.js'
 
 function Opportunities() {
-  const [items, setItems] = useState([])
-  const [filters, setFilters] = useState({ type: '', employmentType: '' })
-  const [showAdzuna, setShowAdzuna] = useState(() => localStorage.getItem('careertrack_show_adzuna_opportunities') !== 'false')
-  const [showJobDataLake, setShowJobDataLake] = useState(() => localStorage.getItem('careertrack_show_jobdatalake_opportunities') !== 'false')
-  const [includeShared, setIncludeShared] = useState(false)
-  const [trackedIds, setTrackedIds] = useState([])
-  const [linkChecks, setLinkChecks] = useState({})
-  const [checkingLinks, setCheckingLinks] = useState([])
-  const [actionMessage, setActionMessage] = useState('')
-
-  useEffect(() => {
-    careerApi.opportunities({ ...filters, includeShared }).then(setItems)
-    careerApi.applications().then((applications) => setTrackedIds(applications.map((item) => item.jobOpportunity.id))).catch(() => null)
-  }, [filters, includeShared])
-
-  function sourceText(item) {
-    return [
-      item.sourceProvider,
-      item.company?.sourceProvider,
-      item.sourceUrl,
-      item.jobUrl,
-      item.description,
-    ]
-      .filter(Boolean)
-      .join(' ')
-      .toLowerCase()
-  }
-
-  function sourceOf(item) {
-    const source = sourceText(item)
-    if (source.includes('adzuna')) return 'Adzuna'
-    if (source.includes('jobdatalake') || source.includes('job data lake')) return 'JobDataLake'
-    if (source.includes('linkedin')) return 'LinkedIn Scout'
-    if (source.includes('google')) return 'Google Search'
-    return item.isImported ? 'Imported' : 'Manual'
-  }
-
-  function cleanText(value, fallback = '-') {
-    const text = String(value || '').replace(/\btrue\b|\bfalse\b/gi, '').replace(/\s*,\s*,+/g, ', ').trim()
-    return text || fallback
-  }
-
-  function primaryUrl(item) {
-    return item.jobUrl || item.sourceUrl || item.company?.website || ''
-  }
-
-  function skillList(value) {
-    return String(value || '')
-      .split(/[,|]/)
-      .map((skill) => skill.trim())
-      .filter((skill) => skill && !['true', 'false', 'null'].includes(skill.toLowerCase()))
-      .slice(0, 8)
-  }
-
-  const visibleItems = useMemo(
-    () =>
-      items.filter((item) => {
-        const source = sourceOf(item)
-        if (!showAdzuna && source === 'Adzuna') return false
-        if (!showJobDataLake && source === 'JobDataLake') return false
-        return true
-      }),
-    [items, showAdzuna, showJobDataLake],
-  )
-  const industries = useMemo(() => [...new Set(visibleItems.map((item) => item.company.industry).filter(Boolean))], [visibleItems])
-
-  function updateShowAdzuna(value) {
-    setShowAdzuna(value)
-    localStorage.setItem('careertrack_show_adzuna_opportunities', String(value))
-  }
-
-  function updateShowJobDataLake(value) {
-    setShowJobDataLake(value)
-    localStorage.setItem('careertrack_show_jobdatalake_opportunities', String(value))
-  }
-
-  async function trackOpportunity(item) {
-    try {
-      await careerApi.createApplication({ jobOpportunityId: item.id, notes: `Tracked from Opportunities: ${sourceOf(item)}` })
-      setTrackedIds((ids) => [...new Set([...ids, item.id])])
-      setActionMessage(`Tracked "${item.title}" in Applications.`)
-    } catch (error) {
-      if (String(error.message || '').includes('already')) {
-        setTrackedIds((ids) => [...new Set([...ids, item.id])])
-        setActionMessage(`"${item.title}" is already tracked in Applications.`)
-      } else {
-        setActionMessage(`Could not track "${item.title}".`)
-      }
-    }
-  }
-
-  async function deleteOpportunity(item) {
-    if (!window.confirm(`Delete "${item.title}" from opportunities?`)) return
-    await careerApi.deleteOpportunity(item.id)
-    setItems((current) => current.filter((entry) => entry.id !== item.id))
-    setActionMessage(`Deleted "${item.title}" from Opportunities.`)
-  }
-
-  async function verifyJobLink(item) {
-    const url = primaryUrl(item)
-    setCheckingLinks((ids) => [...new Set([...ids, item.id])])
-    try {
-      const response = await careerApi.aiChat({
-        message:
-          (url
-            ? `Check this job posting URL for usefulness. Return exactly OK if it looks like a usable job/company application link. If it looks missing, expired, or too generic, return only one better URL if you can infer one. No explanation.`
-            : `Find the most likely official application or careers URL for this role. Return only one URL if you can infer a reliable one. If you cannot, return exactly NO_LINK.`) +
-          `\n\n` +
-          `Role: ${item.title}\nCompany: ${item.company?.name}\nURL: ${url}`,
-        history: [],
-      })
-      const text = response.reply?.trim() || ''
-      const urlMatch = text.match(/https?:\/\/[^\s)]+/i)
-      setLinkChecks((checks) => ({
-        ...checks,
-        [item.id]: urlMatch
-          ? { status: url ? 'Alternative found' : 'Link found', alternativeUrl: urlMatch[0] }
-          : { status: url ? 'Link looks usable' : 'AI could not find a reliable link' },
-      }))
-      setActionMessage(`AI finished checking "${item.title}".`)
-    } finally {
-      setCheckingLinks((ids) => ids.filter((id) => id !== item.id))
-    }
-  }
-
+  const {
+    items,
+    filters,
+    setFilters,
+    showAdzuna,
+    showJobDataLake,
+    includeShared,
+    setIncludeShared,
+    trackedIds,
+    linkChecks,
+    checkingLinks,
+    actionMessage,
+    clearActionMessage,
+    loading,
+    error,
+    clearError,
+    showDeleteAllDialog,
+    setShowDeleteAllDialog,
+    deletingAll,
+    exportingCsv,
+    visibleItems,
+    industries,
+    sourceOf,
+    cleanText,
+    primaryUrl,
+    postingUrl,
+    urlHost,
+    skillList,
+    updateShowAdzuna,
+    updateShowJobDataLake,
+    trackOpportunity,
+    deleteOpportunity,
+    exportOpportunitiesCsv,
+    deleteAllOpportunities,
+    verifyJobLink,
+  } = useOpportunitiesController()
   return (
     <div className="space-y-6">
       <section className="card">
@@ -163,33 +74,65 @@ function Opportunities() {
             </label>
           </div>
         </div>
-        <div className="mt-5 flex flex-wrap gap-3">
-          <label className="flex w-fit items-center gap-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-semibold text-slate-700 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-200">
-            <input type="checkbox" checked={showAdzuna} onChange={(event) => updateShowAdzuna(event.target.checked)} />
-            Show Adzuna
-          </label>
-          <label className="flex w-fit items-center gap-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-semibold text-slate-700 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-200">
-            <input type="checkbox" checked={showJobDataLake} onChange={(event) => updateShowJobDataLake(event.target.checked)} />
-            Show JobDataLake
-          </label>
-          <label className="flex w-fit items-center gap-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-semibold text-slate-700 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-200">
-            <input type="checkbox" checked={includeShared} onChange={(event) => setIncludeShared(event.target.checked)} />
-            Include shared database
-          </label>
+        <div className="mt-5 flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
+          <div className="flex flex-wrap gap-3">
+            <label className="flex w-fit items-center gap-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-semibold text-slate-700 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-200">
+              <input type="checkbox" checked={showAdzuna} onChange={(event) => updateShowAdzuna(event.target.checked)} />
+              Show Adzuna
+            </label>
+            <label className="flex w-fit items-center gap-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-semibold text-slate-700 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-200">
+              <input type="checkbox" checked={showJobDataLake} onChange={(event) => updateShowJobDataLake(event.target.checked)} />
+              Show JobDataLake
+            </label>
+            <label className="flex w-fit items-center gap-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-semibold text-slate-700 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-200">
+              <input type="checkbox" checked={includeShared} onChange={(event) => setIncludeShared(event.target.checked)} />
+              Include shared database
+            </label>
+          </div>
+          <button
+            type="button"
+            onClick={() => setShowDeleteAllDialog(true)}
+            disabled={!items.some((item) => !item.isShared)}
+            className="inline-flex items-center justify-center gap-2 rounded-lg border border-rose-200 bg-rose-50 px-4 py-2.5 text-sm font-bold text-rose-700 transition hover:bg-rose-100 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50 dark:border-rose-900 dark:bg-rose-950/40 dark:text-rose-200 dark:hover:bg-rose-950"
+          >
+            <Trash2 size={17} />
+            Delete all
+          </button>
         </div>
         {actionMessage && (
-          <div className="mt-4 rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm font-semibold text-emerald-800 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-200">
+          <DismissibleNotice
+            className="mt-4 border-emerald-200 bg-emerald-50 text-sm font-semibold text-emerald-800 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-200"
+            onDismiss={clearActionMessage}
+          >
             {actionMessage}
-          </div>
+          </DismissibleNotice>
+        )}
+        {loading && <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm font-semibold text-slate-500 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-400">Loading opportunities...</div>}
+        {error && (
+          <DismissibleNotice
+            className="mt-4 border-rose-200 bg-rose-50 text-sm font-semibold text-rose-700 dark:border-rose-800 dark:bg-rose-950/40 dark:text-rose-200"
+            onDismiss={clearError}
+          >
+            {error}
+          </DismissibleNotice>
         )}
       </section>
 
       <div className="grid gap-6 xl:grid-cols-[1fr_320px]">
         <section className="grid gap-4 md:grid-cols-2">
+          {!loading && !error && visibleItems.length === 0 && (
+            <div className="card md:col-span-2">
+              <p className="label">No opportunities</p>
+              <h3 className="mt-1 text-lg font-bold text-slate-950 dark:text-white">Your opportunity list is empty</h3>
+              <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
+                Import real rows from Data Hub, save companies from the shared database, or search external sources.
+              </p>
+            </div>
+          )}
           {visibleItems.map((item) => (
-            <article key={item.id} className="card">
+            <article key={item.id} className="card overflow-hidden">
               <div className="mb-4 flex items-start justify-between gap-4">
-                <div>
+                <div className="min-w-0">
                   <div className="flex flex-wrap gap-2">
                     <span className="status-pill bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-200">{item.type}</span>
                     <span className="status-pill bg-teal-50 text-teal-700 dark:bg-teal-950/70 dark:text-teal-200">
@@ -198,10 +141,10 @@ function Opportunities() {
                     </span>
                     {item.isShared && <span className="status-pill bg-amber-50 text-amber-700 dark:bg-amber-950/60 dark:text-amber-200">Shared</span>}
                   </div>
-                  <h3 className="mt-3 text-lg font-bold text-slate-950 dark:text-white">{item.title}</h3>
+                  <h3 className="mt-3 break-words text-lg font-bold text-slate-950 dark:text-white">{item.title}</h3>
                   <p className="mt-1 flex items-center gap-1 text-sm text-slate-500 dark:text-slate-400">
                     <Building2 size={15} />
-                    {item.company.name}
+                    <span className="min-w-0 break-words">{item.company.name}</span>
                   </p>
                 </div>
                 {primaryUrl(item) && (
@@ -210,7 +153,7 @@ function Opportunities() {
                     href={primaryUrl(item)}
                     target="_blank"
                     rel="noreferrer"
-                    title="Open posting or company link"
+                    title={`Open ${postingUrl(item) ? 'posting' : 'company'} link`}
                   >
                     <ExternalLink size={17} />
                   </a>
@@ -221,7 +164,7 @@ function Opportunities() {
                   <MapPin size={16} className="text-teal-600 dark:text-teal-300" />
                   {item.isRemote ? 'Remote friendly' : cleanText(item.location, 'Location not specified')}
                 </p>
-                {item.description && <p className="line-clamp-2 leading-6">{cleanText(item.description, '')}</p>}
+                {item.description && <p className="line-clamp-2 break-words leading-6">{cleanText(item.description, '')}</p>}
                 {item.applicationDeadline && <p>Deadline: {dayjs(item.applicationDeadline).format('MMM D, YYYY')}</p>}
               </div>
               <div className="mt-4 flex flex-wrap gap-2">
@@ -239,7 +182,7 @@ function Opportunities() {
                 {primaryUrl(item) && (
                   <a href={primaryUrl(item)} target="_blank" rel="noreferrer" className="btn-secondary">
                     <ExternalLink size={17} />
-                    {item.jobUrl || item.sourceUrl ? 'Open posting' : 'Open company'}
+                    {postingUrl(item) ? 'Open posting' : 'Open company'}
                   </a>
                 )}
                 <button
@@ -253,7 +196,7 @@ function Opportunities() {
                 </button>
                 <button type="button" onClick={() => verifyJobLink(item)} disabled={checkingLinks.includes(item.id)} className="btn-secondary">
                   {checkingLinks.includes(item.id) ? <LoaderCircle className="animate-spin" size={17} /> : <ShieldCheck size={17} />}
-                  {checkingLinks.includes(item.id) ? 'Checking link...' : primaryUrl(item) ? 'AI verify link' : 'AI find link'}
+                  {checkingLinks.includes(item.id) ? 'Checking link...' : primaryUrl(item) ? 'Verify link' : 'AI find link'}
                 </button>
                 <button type="button" onClick={() => deleteOpportunity(item)} disabled={item.isShared} className="btn-secondary disabled:cursor-not-allowed disabled:opacity-45">
                   <Trash2 size={17} />
@@ -261,15 +204,18 @@ function Opportunities() {
                 </button>
               </div>
               {linkChecks[item.id]?.alternativeUrl && (
-                <p className="mt-3 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-200">
-                  AI alternative link:{' '}
-                  <a className="font-bold underline" href={linkChecks[item.id].alternativeUrl} target="_blank" rel="noreferrer">
-                    {linkChecks[item.id].alternativeUrl}
+                <div className="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-200">
+                  <span className="font-semibold">{linkChecks[item.id].status || 'AI suggested another link'}</span>
+                  <a className="inline-flex items-center gap-2 rounded-lg bg-amber-100 px-3 py-2 text-sm font-bold text-amber-900 transition hover:bg-amber-200 dark:bg-amber-900/50 dark:text-amber-100 dark:hover:bg-amber-900" href={linkChecks[item.id].alternativeUrl} target="_blank" rel="noreferrer" title={linkChecks[item.id].alternativeUrl}>
+                    <ExternalLink size={16} />
+                    Open {urlHost(linkChecks[item.id].alternativeUrl)}
                   </a>
-                </p>
+                </div>
               )}
               {linkChecks[item.id]?.status && !linkChecks[item.id]?.alternativeUrl && (
-                <p className="mt-3 text-sm font-semibold text-emerald-700 dark:text-emerald-300">{linkChecks[item.id].status}</p>
+                <p className={`mt-3 text-sm font-semibold ${linkChecks[item.id]?.isProblem ? 'text-amber-700 dark:text-amber-300' : 'text-emerald-700 dark:text-emerald-300'}`}>
+                  {linkChecks[item.id].status}
+                </p>
               )}
             </article>
           ))}
@@ -296,6 +242,64 @@ function Opportunities() {
           />
         </aside>
       </div>
+
+      {showDeleteAllDialog && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4 backdrop-blur-sm">
+          <div className="w-full max-w-lg rounded-lg border border-slate-200 bg-white p-5 shadow-2xl dark:border-slate-800 dark:bg-slate-900">
+            <div className="flex items-start justify-between gap-4">
+              <div className="flex gap-3">
+                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-rose-50 text-rose-600 dark:bg-rose-950/60 dark:text-rose-200">
+                  <AlertTriangle size={20} />
+                </div>
+                <div>
+                  <p className="label">Danger zone</p>
+                  <h3 className="mt-1 text-lg font-bold text-slate-950 dark:text-white">Delete all opportunities?</h3>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowDeleteAllDialog(false)}
+                disabled={deletingAll}
+                className="rounded-lg p-2 text-slate-500 transition hover:bg-slate-100 active:scale-95 disabled:opacity-50 dark:text-slate-300 dark:hover:bg-slate-800"
+                title="Close"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="mt-5 space-y-3 text-sm leading-6 text-slate-600 dark:text-slate-300">
+              <p>
+                This will delete all personal opportunities in your workspace. Shared database rows will stay untouched.
+              </p>
+              <p className="rounded-lg border border-amber-200 bg-amber-50 p-3 font-semibold text-amber-900 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-200">
+                If an opportunity is already linked in Applications, the linked application and interview records will also be removed from your workspace.
+              </p>
+              <p>
+                Export a CSV first if you may want to restore these rows later through Data Hub.
+              </p>
+            </div>
+
+            <div className="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+              <button type="button" onClick={exportOpportunitiesCsv} disabled={exportingCsv || deletingAll} className="btn-secondary">
+                {exportingCsv ? <LoaderCircle className="animate-spin" size={17} /> : <Download size={17} />}
+                {exportingCsv ? 'Exporting...' : 'Export CSV first'}
+              </button>
+              <button type="button" onClick={() => setShowDeleteAllDialog(false)} disabled={deletingAll} className="btn-secondary">
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={deleteAllOpportunities}
+                disabled={deletingAll}
+                className="inline-flex items-center justify-center gap-2 rounded-lg bg-rose-600 px-4 py-2.5 text-sm font-bold text-white transition hover:bg-rose-700 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-65 dark:bg-rose-500 dark:text-white dark:hover:bg-rose-400"
+              >
+                {deletingAll ? <LoaderCircle className="animate-spin" size={17} /> : <Trash2 size={17} />}
+                {deletingAll ? 'Deleting...' : 'Delete all'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { authApi, careerApi, clearAuth, saveAuth } from '../lib/api.js'
 import { AuthContext } from './AuthContextCore.js'
 
@@ -14,6 +14,33 @@ export function AuthProvider({ children }) {
   const [user, setUser] = useState(readStoredUser)
   const [loading, setLoading] = useState(false)
   const isAuthenticated = Boolean(localStorage.getItem('careertrack_access_token') && user)
+
+  useEffect(() => {
+    const refreshToken = localStorage.getItem('careertrack_refresh_token')
+    if (!refreshToken) return undefined
+
+    let mounted = true
+    setLoading(true)
+    authApi
+      .refreshToken(refreshToken)
+      .then((auth) => {
+        if (!mounted) return
+        saveAuth(auth)
+        setUser(auth.user)
+      })
+      .catch(() => {
+        if (!mounted) return
+        clearAuth()
+        setUser(null)
+      })
+      .finally(() => {
+        if (mounted) setLoading(false)
+      })
+
+    return () => {
+      mounted = false
+    }
+  }, [])
 
   async function login(payload) {
     setLoading(true)

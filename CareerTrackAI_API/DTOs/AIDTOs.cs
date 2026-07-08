@@ -31,6 +31,7 @@ namespace CareerTrackAI.DTOs.AI
         public List<string> MissingSkills { get; set; } = new();
         public List<string> Suggestions { get; set; } = new();
         public int OverallScore { get; set; }  // 0-100
+        public Dictionary<string, int> ScoreBreakdown { get; set; } = new();
     }
 
     public class GenerateCoverLetterRequest

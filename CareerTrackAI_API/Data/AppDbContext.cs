@@ -17,6 +17,8 @@ namespace CareerTrackAI.Data
         public DbSet<Interview> Interviews { get; set; }
         public DbSet<Notification> Notifications { get; set; }
         public DbSet<RefreshToken> RefreshTokens { get; set; }
+        public DbSet<ApiUsageLog> ApiUsageLogs { get; set; }
+        public DbSet<GeminiUsageLog> GeminiUsageLogs { get; set; }
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
@@ -31,6 +33,8 @@ namespace CareerTrackAI.Data
             modelBuilder.Entity<ResumeVersion>().HasQueryFilter(e => !e.IsDeleted);
             modelBuilder.Entity<Interview>().HasQueryFilter(e => !e.IsDeleted);
             modelBuilder.Entity<Notification>().HasQueryFilter(e => !e.IsDeleted);
+            modelBuilder.Entity<ApiUsageLog>().HasQueryFilter(e => !e.IsDeleted);
+            modelBuilder.Entity<GeminiUsageLog>().HasQueryFilter(e => !e.IsDeleted);
 
             // ==================== USER ====================
             modelBuilder.Entity<User>(entity =>
@@ -39,6 +43,8 @@ namespace CareerTrackAI.Data
                 entity.Property(u => u.Email).IsRequired().HasMaxLength(255);
                 entity.Property(u => u.FullName).IsRequired().HasMaxLength(150);
                 entity.Property(u => u.PasswordHash).IsRequired();
+                entity.Property(u => u.CareerObjective).HasMaxLength(1000);
+                entity.Property(u => u.NotificationsEnabled).HasDefaultValue(true);
                 entity.Property(u => u.Role)
                       .HasConversion<string>()
                       .HasDefaultValue(UserRole.Student);
@@ -189,6 +195,37 @@ namespace CareerTrackAI.Data
                 entity.HasOne(n => n.User)
                       .WithMany(u => u.Notifications)
                       .HasForeignKey(n => n.UserId)
+                      .OnDelete(DeleteBehavior.Cascade);
+            });
+
+            // ==================== EXTERNAL API USAGE LOG ====================
+            modelBuilder.Entity<ApiUsageLog>(entity =>
+            {
+                entity.Property(a => a.Provider).IsRequired().HasMaxLength(80);
+                entity.Property(a => a.Operation).IsRequired().HasMaxLength(80);
+                entity.Property(a => a.Message).HasMaxLength(500);
+                entity.HasIndex(a => new { a.UserId, a.CreatedAt });
+                entity.HasIndex(a => a.Provider);
+                entity.HasIndex(a => a.Operation);
+
+                entity.HasOne(a => a.User)
+                      .WithMany()
+                      .HasForeignKey(a => a.UserId)
+                      .OnDelete(DeleteBehavior.Cascade);
+            });
+
+            // ==================== GEMINI USAGE LOG ====================
+            modelBuilder.Entity<GeminiUsageLog>(entity =>
+            {
+                entity.Property(g => g.Feature).IsRequired().HasMaxLength(120);
+                entity.Property(g => g.Model).HasMaxLength(120);
+                entity.HasIndex(g => new { g.UserId, g.CreatedAt });
+                entity.HasIndex(g => g.Feature);
+                entity.HasIndex(g => g.Model);
+
+                entity.HasOne(g => g.User)
+                      .WithMany()
+                      .HasForeignKey(g => g.UserId)
                       .OnDelete(DeleteBehavior.Cascade);
             });
         }

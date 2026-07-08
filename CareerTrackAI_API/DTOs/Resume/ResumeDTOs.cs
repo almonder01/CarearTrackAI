@@ -25,33 +25,32 @@ namespace CareerTrackAI.DTOs.Resume
         public DateTime CreatedAt { get; set; }
     }
 
-    /// <summary>
-    /// POST /api/resumes - رفع سيرة ذاتية جديدة
-    /// الملف يُرسل كـ multipart/form-data
-    /// </summary>
     public class CreateResumeRequest
     {
         [Required]
         [MaxLength(150)]
         public string Label { get; set; } = string.Empty;
-
-        /// <summary>
-        /// الملف يُرفع كـ IFormFile في الـ Controller
-        /// </summary>
     }
 
-    /// <summary>
-    /// POST /api/resumes/{id}/customize - طلب تخصيص AI لشركة معينة
-    /// </summary>
-    public class CustomizeResumeRequest
+    public class CreateAiResumeVersionRequest
     {
-        [Required]
-        public int TargetCompanyId { get; set; }
+        public int? JobOpportunityId { get; set; }
+        public int? TargetCompanyId { get; set; }
 
-        /// <summary>
-        /// تعليمات إضافية للذكاء الاصطناعي - اختياري
-        /// مثال: "ركّز على مهارات React وNode.js"
-        /// </summary>
+        [MaxLength(180)]
+        public string? TargetRole { get; set; }
+
+        [MaxLength(200)]
+        public string? VersionName { get; set; }
+
+        [MaxLength(1000)]
         public string? AdditionalInstructions { get; set; }
+    }
+
+    public class CreateAiResumeVersionResponse
+    {
+        public ResumeVersionResponse? Version { get; set; }
+        public string Message { get; set; } = string.Empty;
+        public string? Preview { get; set; }
     }
 }

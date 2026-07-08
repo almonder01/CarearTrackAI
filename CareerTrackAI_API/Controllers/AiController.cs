@@ -1,9 +1,11 @@
 using System.Security.Claims;
+using CareerTrackAI.Data;
 using CareerTrackAI.DTOs.AI;
 using CareerTrackAI.Services;
 using CareerTrackAI.Shared;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 
 namespace CareerTrackAI.Controllers
 {
@@ -14,11 +16,13 @@ namespace CareerTrackAI.Controllers
     {
         private readonly IAiService _aiService;
         private readonly IGeminiUsageTracker _usageTracker;
+        private readonly AppDbContext _db;
 
-        public AiController(IAiService aiService, IGeminiUsageTracker usageTracker)
+        public AiController(IAiService aiService, IGeminiUsageTracker usageTracker, AppDbContext db)
         {
             _aiService = aiService;
             _usageTracker = usageTracker;
+            _db = db;
         }
 
         // POST /api/ai/chat
@@ -79,10 +83,11 @@ namespace CareerTrackAI.Controllers
 
         // GET /api/ai/usage
         [HttpGet("usage")]
-        public IActionResult GetUsage()
+        public async Task<IActionResult> GetUsage([FromQuery] string grain = "day")
         {
             var userId = GetUserId();
-            return Ok(ApiResponse<GeminiUsageSummary>.Ok(_usageTracker.GetSummary(userId)));
+            var user = await _db.Users.AsNoTracking().FirstOrDefaultAsync(u => u.Id == userId);
+            return Ok(ApiResponse<GeminiUsageSummary>.Ok(_usageTracker.GetSummary(userId, user?.CreatedAt ?? DateTime.UtcNow, grain)));
         }
 
         // GET /api/ai/ping

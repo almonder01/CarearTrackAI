@@ -18,6 +18,16 @@ namespace CareerTrackAI.Services
         string? Message,
         List<JobOpportunityResponse> Opportunities);
     public record AiSourcingResult(AiSourcingPlan Plan, AiSourcingSearchResult Search, ImportResult? ImportResult);
+    public record AiCompanySourcingSearchResult(
+        string Provider,
+        int Count,
+        string? Country,
+        string Query,
+        string Location,
+        bool Configured,
+        string? Message,
+        List<WebSourcedCompany> Companies);
+    public record AiCompanySourcingResult(AiSourcingPlan Plan, AiCompanySourcingSearchResult Search);
     public record WebSourcedOpportunity(
         string Title,
         string CompanyName,
@@ -28,11 +38,25 @@ namespace CareerTrackAI.Services
         string? RequiredSkills,
         string? JobUrl,
         string? SourceUrl);
+    public record WebSourcedCompany(
+        string Name,
+        string? Industry,
+        string? Description,
+        string? City,
+        string? Country,
+        string? Website,
+        string? Email,
+        string? Phone,
+        string? LinkedInUrl,
+        string? LogoUrl,
+        string? SourceUrl,
+        string? SourceProvider);
 
     public interface IAiSourcingService
     {
         Task<AiSourcingResult> SearchAsync(int userId, AiSourcingRequest request);
         Task<AiSourcingResult> ImportAsync(int userId, AiSourcingRequest request);
+        Task<AiCompanySourcingResult> SearchCompaniesAsync(int userId, AiSourcingRequest request);
     }
 
     public class AiSourcingService : IAiSourcingService
@@ -42,19 +66,22 @@ namespace CareerTrackAI.Services
         private readonly GeminiOptions _geminiOptions;
         private readonly IAdzunaJobImportService _adzunaService;
         private readonly IJobDataLakeImportService _jobDataLakeService;
+        private readonly IGeminiUsageTracker _usageTracker;
 
         public AiSourcingService(
             IHttpClientFactory factory,
             AppDbContext db,
             GeminiOptions geminiOptions,
             IAdzunaJobImportService adzunaService,
-            IJobDataLakeImportService jobDataLakeService)
+            IJobDataLakeImportService jobDataLakeService,
+            IGeminiUsageTracker usageTracker)
         {
             _httpClient = factory.CreateClient("Gemini");
             _db = db;
             _geminiOptions = geminiOptions;
             _adzunaService = adzunaService;
             _jobDataLakeService = jobDataLakeService;
+            _usageTracker = usageTracker;
         }
 
         public async Task<AiSourcingResult> SearchAsync(int userId, AiSourcingRequest request)
@@ -75,6 +102,25 @@ namespace CareerTrackAI.Services
             return new AiSourcingResult(plan, search, import);
         }
 
+        public async Task<AiCompanySourcingResult> SearchCompaniesAsync(int userId, AiSourcingRequest request)
+        {
+            var user = await _db.Users.AsNoTracking().FirstOrDefaultAsync(u => u.Id == userId);
+            var source = string.IsNullOrWhiteSpace(request.Prompt)
+                ? $"{user?.CareerObjective ?? user?.Major ?? "technology"} companies"
+                : request.Prompt.Trim();
+            var country = string.IsNullOrWhiteSpace(request.Country) ? null : request.Country.Trim().ToUpperInvariant();
+            var provider = NormalizeCompanyProvider(request.Provider);
+            var plan = new AiSourcingPlan(
+                source,
+                string.IsNullOrWhiteSpace(user?.City) ? country : user.City,
+                "AI converted the request into a company discovery scout.",
+                provider,
+                country);
+
+            var search = await SearchCompaniesWebAsync(userId, request, plan);
+            return new AiCompanySourcingResult(plan, search);
+        }
+
         private async Task<AiSourcingSearchResult> SearchProviderAsync(int userId, AiSourcingRequest request, AiSourcingPlan plan)
         {
             if (string.Equals(plan.Provider, "adzuna", StringComparison.OrdinalIgnoreCase))
@@ -85,7 +131,7 @@ namespace CareerTrackAI.Services
 
             if (IsWebProvider(plan.Provider))
             {
-                return await SearchWebAsync(request, plan);
+                return await SearchWebAsync(userId, request, plan);
             }
 
             var jdl = await _jobDataLakeService.SearchAsync(
@@ -114,7 +160,7 @@ namespace CareerTrackAI.Services
         private async Task<AiSourcingPlan> BuildPlanAsync(int userId, AiSourcingRequest request)
         {
             var user = await _db.Users.FirstOrDefaultAsync(u => u.Id == userId);
-            var fallback = BuildFallbackPlan(request.Prompt, user?.Major, user?.City);
+            var fallback = BuildFallbackPlan(request.Prompt, user?.Major, user?.City, user?.CareerObjective);
             if (!_geminiOptions.IsConfigured) return fallback;
 
             var prompt =
@@ -130,6 +176,7 @@ namespace CareerTrackAI.Services
                 "- Prefer student, graduate, internship, junior, or entry-level keywords when suitable.\n\n" +
                 $"User major: {user?.Major ?? "Not specified"}\n" +
                 $"User city: {user?.City ?? "Not specified"}\n" +
+                $"User career focus: {user?.CareerObjective ?? "Not specified"}\n" +
                 $"Selected provider: {request.Provider ?? "auto"}\n" +
                 $"Selected country: {request.Country ?? "auto"}\n" +
                 $"Request: {request.Prompt}";
@@ -156,6 +203,7 @@ namespace CareerTrackAI.Services
                 if (!response.IsSuccessStatusCode) return fallback;
 
                 using var doc = JsonDocument.Parse(responseBody);
+                RecordGeminiUsage(userId, "AI sourcing plan", doc.RootElement);
                 var text = doc.RootElement
                     .GetProperty("candidates")[0]
                     .GetProperty("content")
@@ -182,9 +230,11 @@ namespace CareerTrackAI.Services
             }
         }
 
-        private static AiSourcingPlan BuildFallbackPlan(string? prompt, string? major, string? city)
+        private static AiSourcingPlan BuildFallbackPlan(string? prompt, string? major, string? city, string? careerObjective)
         {
-            var source = string.IsNullOrWhiteSpace(prompt) ? $"{major} internship" : prompt.Trim();
+            var source = string.IsNullOrWhiteSpace(prompt)
+                ? string.IsNullOrWhiteSpace(careerObjective) ? $"{major} internship" : careerObjective.Trim()
+                : prompt.Trim();
             var lower = source.ToLowerInvariant();
             var where =
                 lower.Contains("kuala lumpur") ? "Kuala Lumpur" :
@@ -217,12 +267,18 @@ namespace CareerTrackAI.Services
             return "jobdatalake";
         }
 
+        private static string NormalizeCompanyProvider(string? provider)
+        {
+            if (string.Equals(provider, "linkedin", StringComparison.OrdinalIgnoreCase)) return "linkedin";
+            return "google";
+        }
+
         private static bool IsWebProvider(string? provider) =>
             string.Equals(provider, "google", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(provider, "linkedin", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(provider, "web", StringComparison.OrdinalIgnoreCase);
 
-        private async Task<AiSourcingSearchResult> SearchWebAsync(AiSourcingRequest request, AiSourcingPlan plan)
+        private async Task<AiSourcingSearchResult> SearchWebAsync(int userId, AiSourcingRequest request, AiSourcingPlan plan)
         {
             if (!_geminiOptions.IsConfigured)
             {
@@ -270,9 +326,18 @@ namespace CareerTrackAI.Services
 
                 var responseBody = await response.Content.ReadAsStringAsync();
                 if (!response.IsSuccessStatusCode)
-                    return new AiSourcingSearchResult(providerLabel, 0, plan.Country ?? request.Country, plan.What, plan.Where ?? string.Empty, true, $"Web scout returned {(int)response.StatusCode}. {responseBody}", []);
+                    return new AiSourcingSearchResult(
+                        providerLabel,
+                        0,
+                        plan.Country ?? request.Country,
+                        plan.What,
+                        plan.Where ?? string.Empty,
+                        true,
+                        FriendlyWebScoutError((int)response.StatusCode, responseBody),
+                        []);
 
                 using var doc = JsonDocument.Parse(responseBody);
+                RecordGeminiUsage(userId, "AI web sourcing", doc.RootElement);
                 var text = doc.RootElement
                     .GetProperty("candidates")[0]
                     .GetProperty("content")
@@ -328,6 +393,107 @@ namespace CareerTrackAI.Services
             }
         }
 
+        private async Task<AiCompanySourcingSearchResult> SearchCompaniesWebAsync(int userId, AiSourcingRequest request, AiSourcingPlan plan)
+        {
+            var providerLabel = string.Equals(plan.Provider, "linkedin", StringComparison.OrdinalIgnoreCase) ? "LinkedIn Company Scout" : "Google Company Scout";
+            if (!_geminiOptions.IsConfigured)
+            {
+                return new AiCompanySourcingSearchResult(providerLabel, 0, plan.Country ?? request.Country, plan.What, plan.Where ?? string.Empty, false, "Gemini is not configured, so company scouting cannot run.", []);
+            }
+
+            var limit = Math.Clamp(request.ResultsPerPage, 1, 12);
+            var scoutInstruction = string.Equals(plan.Provider, "linkedin", StringComparison.OrdinalIgnoreCase)
+                ? "Prioritize public LinkedIn company pages and official company websites. Do not include private or login-only content."
+                : "Prioritize official company websites, credible directories, and public company profile pages.";
+
+            var prompt =
+                "Use Google Search to find real companies that match the user's company discovery request. Return JSON only.\n\n" +
+                "JSON shape: { \"companies\": [{ \"name\": \"...\", \"industry\": \"...\", \"description\": \"short factual note\", \"city\": \"...\", \"country\": \"ISO or country name\", \"website\": \"https://...\", \"email\": \"\", \"phone\": \"\", \"linkedInUrl\": \"https://...\", \"logoUrl\": \"\", \"sourceUrl\": \"https://...\", \"sourceProvider\": \"Google Company Scout\" }] }\n\n" +
+                "Rules:\n" +
+                "- Return companies, not job postings.\n" +
+                "- Only include real company names.\n" +
+                "- Prefer rows with an official website, LinkedIn company page, or credible source URL.\n" +
+                "- Do not invent emails, phone numbers, salaries, or private data. Leave unknown fields empty.\n" +
+                "- Keep descriptions factual and brief.\n\n" +
+                $"Limit: {limit}\n" +
+                $"Request: {request.Prompt}\n" +
+                $"Keywords: {plan.What}\n" +
+                $"Country: {plan.Country ?? request.Country ?? "any"}\n" +
+                $"Location: {plan.Where ?? "any"}\n" +
+                scoutInstruction + "\n" +
+                "If there are no reliable results, return { \"companies\": [] }.";
+
+            var body = JsonSerializer.Serialize(new
+            {
+                contents = new[]
+                {
+                    new
+                    {
+                        role = "user",
+                        parts = new[] { new { text = prompt } }
+                    }
+                },
+                tools = new[]
+                {
+                    new { google_search = new { } }
+                }
+            });
+
+            try
+            {
+                using var response = await _httpClient.PostAsync(
+                    $"v1beta/models/{_geminiOptions.ModelId}:generateContent",
+                    new StringContent(body, Encoding.UTF8, "application/json"));
+
+                var responseBody = await response.Content.ReadAsStringAsync();
+                if (!response.IsSuccessStatusCode)
+                    return new AiCompanySourcingSearchResult(
+                        providerLabel,
+                        0,
+                        plan.Country ?? request.Country,
+                        plan.What,
+                        plan.Where ?? string.Empty,
+                        true,
+                        FriendlyWebScoutError((int)response.StatusCode, responseBody),
+                        []);
+
+                using var doc = JsonDocument.Parse(responseBody);
+                RecordGeminiUsage(userId, "AI company sourcing", doc.RootElement);
+                var text = doc.RootElement
+                    .GetProperty("candidates")[0]
+                    .GetProperty("content")
+                    .GetProperty("parts")[0]
+                    .GetProperty("text")
+                    .GetString();
+
+                var cleaned = (text ?? string.Empty).Replace("```json", "").Replace("```", "").Trim();
+                var parsed = JsonSerializer.Deserialize<WebCompanySourcingEnvelope>(cleaned, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+                var companies = (parsed?.Companies ?? [])
+                    .Where(company => !string.IsNullOrWhiteSpace(company.Name))
+                    .Take(limit)
+                    .Select(company => company with
+                    {
+                        Country = string.IsNullOrWhiteSpace(company.Country) ? plan.Country ?? request.Country : company.Country,
+                        SourceProvider = string.IsNullOrWhiteSpace(company.SourceProvider) ? providerLabel : company.SourceProvider
+                    })
+                    .ToList();
+
+                return new AiCompanySourcingSearchResult(
+                    providerLabel,
+                    companies.Count,
+                    plan.Country ?? request.Country,
+                    plan.What,
+                    plan.Where ?? string.Empty,
+                    true,
+                    companies.Count == 0 ? "Company scout did not find reliable rows. Try a broader industry, city, or country." : "Company scout results should be reviewed before importing.",
+                    companies);
+            }
+            catch
+            {
+                return new AiCompanySourcingSearchResult(providerLabel, 0, plan.Country ?? request.Country, plan.What, plan.Where ?? string.Empty, true, "Company scout could not parse results. Try broader keywords.", []);
+            }
+        }
+
         private static string? NormalizeEmploymentText(string? value)
         {
             var normalized = (value ?? string.Empty).Replace("_", "", StringComparison.OrdinalIgnoreCase).Replace("-", "", StringComparison.OrdinalIgnoreCase).ToLowerInvariant();
@@ -341,9 +507,54 @@ namespace CareerTrackAI.Services
             };
         }
 
+        private static string FriendlyWebScoutError(int statusCode, string responseBody)
+        {
+            var raw = responseBody.ToLowerInvariant();
+            if (statusCode == 429 || raw.Contains("quota") || raw.Contains("resource_exhausted") || raw.Contains("rate limit"))
+                return "AI web scouting is connected, but the Gemini quota or daily limit has been reached. Try again later or use Adzuna/JobDataLake directly.";
+
+            if (statusCode is 401 or 403 || raw.Contains("api key") || raw.Contains("permission") || raw.Contains("unauthorized"))
+                return "AI web scouting could not run because Gemini rejected the API key or model access.";
+
+            if (statusCode == 404 || raw.Contains("not found"))
+                return "AI web scouting could not find the configured Gemini model. Check the backend model setting.";
+
+            if (statusCode >= 500)
+                return "AI web scouting is temporarily unavailable from the provider. Try again shortly or use another source.";
+
+            return "AI web scouting could not complete this search. Try broader keywords or use JobDataLake/Adzuna directly.";
+        }
+
+        private void RecordGeminiUsage(int userId, string feature, JsonElement root)
+        {
+            if (userId <= 0 || !root.TryGetProperty("usageMetadata", out var usage))
+                return;
+
+            var promptTokens = GetIntProperty(usage, "promptTokenCount");
+            var outputTokens = GetIntProperty(usage, "candidatesTokenCount");
+            var totalTokens = GetIntProperty(usage, "totalTokenCount");
+
+            if (totalTokens == 0)
+                totalTokens = promptTokens + outputTokens;
+
+            _usageTracker.Record(userId, feature, promptTokens, outputTokens, totalTokens, _geminiOptions.ModelId);
+        }
+
+        private static int GetIntProperty(JsonElement element, string propertyName)
+        {
+            return element.TryGetProperty(propertyName, out var value) && value.TryGetInt32(out var number)
+                ? number
+                : 0;
+        }
+
         private class WebSourcingEnvelope
         {
             public List<WebSourcedOpportunity> Jobs { get; set; } = [];
+        }
+
+        private class WebCompanySourcingEnvelope
+        {
+            public List<WebSourcedCompany> Companies { get; set; } = [];
         }
     }
 }

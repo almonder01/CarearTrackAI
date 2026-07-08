@@ -33,6 +33,7 @@ namespace CareerTrackAI.DTOs.JobOpportunity
         public bool IsActive { get; set; }
         public bool IsImported { get; set; }
         public bool IsShared { get; set; }
+        public int? NotificationTargetCount { get; set; }
         public DateTime CreatedAt { get; set; }
 
         public CompanySummary Company { get; set; } = null!;
@@ -73,6 +74,14 @@ namespace CareerTrackAI.DTOs.JobOpportunity
         [Url]
         public string? JobUrl { get; set; }
 
+        [MaxLength(500)]
+        public string? SourceUrl { get; set; }
+
+        [MaxLength(100)]
+        public string? SourceProvider { get; set; }
+
+        public bool IsActive { get; set; } = true;
+
         [Required]
         public int CompanyId { get; set; }
     }
@@ -86,6 +95,7 @@ namespace CareerTrackAI.DTOs.JobOpportunity
         public string? Title { get; set; }
 
         public string? Description { get; set; }
+        public OpportunityType? Type { get; set; }
         public EmploymentType? EmploymentType { get; set; }
 
         [MaxLength(200)]
@@ -100,6 +110,21 @@ namespace CareerTrackAI.DTOs.JobOpportunity
         [MaxLength(500)]
         public string? JobUrl { get; set; }
 
+        [MaxLength(500)]
+        public string? SourceUrl { get; set; }
+
+        [MaxLength(100)]
+        public string? SourceProvider { get; set; }
+
+        public int? CompanyId { get; set; }
+
         public bool? IsActive { get; set; }
+    }
+
+    public class SaveSharedOpportunityResponse
+    {
+        public JobOpportunityResponse Opportunity { get; set; } = null!;
+        public bool CompanyCreated { get; set; }
+        public bool OpportunityCreated { get; set; }
     }
 }

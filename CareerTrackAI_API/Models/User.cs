@@ -14,8 +14,10 @@ namespace CareerTrackAI.Models
         public string? Major { get; set; }
         public string? City { get; set; }
         public int? GraduationYear { get; set; }
+        public string? CareerObjective { get; set; }
 
         public DateTime? LastLoginAt { get; set; }
+        public bool NotificationsEnabled { get; set; } = true;
 
         // Navigation
         public ICollection<Application> Applications { get; set; } = new List<Application>();

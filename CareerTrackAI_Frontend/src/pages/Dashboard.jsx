@@ -1,12 +1,13 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { Area, AreaChart, Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
+import { Area, AreaChart, Bar, BarChart, CartesianGrid, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import { ArrowRight, BadgeCheck, BriefcaseBusiness, CheckCircle2, Circle, Clock3, Target, TrendingUp } from 'lucide-react'
 import dayjs from 'dayjs'
 import MetricCard from '../components/MetricCard.jsx'
 import AiActionPanel from '../components/AiActionPanel.jsx'
+import DismissibleNotice from '../components/DismissibleNotice.jsx'
 import { careerApi } from '../lib/api.js'
-import { statusMeta } from '../data/mockData.js'
+import { statusMeta } from '../data/applicationStatus.js'
 
 function GettingStarted({ checklist }) {
   const [collapsed, setCollapsed] = useState(() => localStorage.getItem('careertrack_getting_started_collapsed') === 'true')
@@ -97,26 +98,52 @@ function GettingStarted({ checklist }) {
 function Dashboard() {
   const [stats, setStats] = useState(null)
   const [checklist, setChecklist] = useState(null)
+  const [activityGrain, setActivityGrain] = useState('month')
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
 
   useEffect(() => {
-    careerApi.dashboard().then(setStats)
+    setLoading(true)
+    setError('')
+    careerApi
+      .dashboard({ activityGrain })
+      .then(setStats)
+      .catch((err) => setError(err.message || 'Could not load dashboard stats.'))
+      .finally(() => setLoading(false))
+  }, [activityGrain])
+
+  useEffect(() => {
     careerApi.dashboardChecklist().then(setChecklist).catch(() => null)
   }, [])
 
-  if (!stats) return <div className="card animate-pulse">Loading dashboard...</div>
+  if (loading && !stats) return <div className="card animate-pulse">Loading dashboard...</div>
+  if (error && !stats) {
+    return (
+      <DismissibleNotice
+        className="border-rose-200 bg-rose-50 text-sm font-semibold text-rose-700 dark:border-rose-800 dark:bg-rose-950/40 dark:text-rose-200"
+        onDismiss={() => setError('')}
+      >
+        {error}
+      </DismissibleNotice>
+    )
+  }
+  if (!stats) return <div className="card text-sm font-semibold text-slate-500 dark:text-slate-400">Dashboard data is not available right now.</div>
 
   const showCharts = localStorage.getItem('careertrack_show_dashboard_charts') !== 'false'
   const showAiPanels = localStorage.getItem('careertrack_show_ai_panels') !== 'false'
   const statusData = Object.entries(stats.byStatus || {}).map(([name, value]) => ({ name, value }))
-  const trendData = [
-    { week: 'W1', applications: 3, replies: 1 },
-    { week: 'W2', applications: 7, replies: 2 },
-    { week: 'W3', applications: 11, replies: 5 },
-    { week: 'W4', applications: stats.totalApplications, replies: stats.accepted + stats.rejected },
-  ]
+  const trendData = stats.applicationActivity || []
 
   return (
     <div className="space-y-6">
+      {error && (
+        <DismissibleNotice
+          className="border-amber-200 bg-amber-50 text-sm font-semibold text-amber-900 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-200"
+          onDismiss={() => setError('')}
+        >
+          {error}
+        </DismissibleNotice>
+      )}
       <GettingStarted checklist={checklist} />
 
       <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
@@ -161,8 +188,32 @@ function Dashboard() {
       <section className="grid gap-6 xl:grid-cols-2">
         {showCharts ? (
           <div className="card">
-            <p className="label">Momentum</p>
-            <h2 className="mt-1 text-xl font-bold text-slate-950 dark:text-white">Application activity</h2>
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <p className="label">Momentum</p>
+                <h2 className="mt-1 text-xl font-bold text-slate-950 dark:text-white">Application activity</h2>
+              </div>
+              <div className="flex rounded-lg border border-slate-200 bg-slate-50 p-1 dark:border-slate-800 dark:bg-slate-950">
+                {[
+                  ['day', 'Day'],
+                  ['month', 'Month'],
+                  ['year', 'Year'],
+                ].map(([value, label]) => (
+                  <button
+                    key={value}
+                    type="button"
+                    onClick={() => setActivityGrain(value)}
+                    className={`rounded-md px-3 py-1.5 text-xs font-bold transition ${
+                      activityGrain === value
+                        ? 'bg-slate-950 text-white dark:bg-teal-400 dark:text-slate-950'
+                        : 'text-slate-600 hover:bg-white dark:text-slate-300 dark:hover:bg-slate-900'
+                    }`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </div>
             <div className="mt-5 h-64">
               <ResponsiveContainer width="100%" height="100%">
                 <AreaChart data={trendData}>
@@ -171,12 +222,18 @@ function Dashboard() {
                       <stop offset="0%" stopColor="#14b8a6" stopOpacity={0.45} />
                       <stop offset="100%" stopColor="#14b8a6" stopOpacity={0.05} />
                     </linearGradient>
+                    <linearGradient id="replies" x1="0" x2="0" y1="0" y2="1">
+                      <stop offset="0%" stopColor="#f59e0b" stopOpacity={0.35} />
+                      <stop offset="100%" stopColor="#f59e0b" stopOpacity={0.04} />
+                    </linearGradient>
                   </defs>
                   <CartesianGrid strokeDasharray="3 3" vertical={false} />
                   <XAxis dataKey="week" tickLine={false} axisLine={false} />
                   <YAxis tickLine={false} axisLine={false} />
                   <Tooltip />
+                  <Legend />
                   <Area dataKey="applications" stroke="#0f766e" fill="url(#activity)" strokeWidth={3} />
+                  <Area dataKey="replies" stroke="#d97706" fill="url(#replies)" strokeWidth={2} />
                 </AreaChart>
               </ResponsiveContainer>
             </div>
