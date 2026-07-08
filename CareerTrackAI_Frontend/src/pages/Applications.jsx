@@ -4,6 +4,7 @@ import { CSS } from '@dnd-kit/utilities'
 import { Bot, CalendarDays, GripVertical, MoveHorizontal, Trash2 } from 'lucide-react'
 import dayjs from 'dayjs'
 import AiActionPanel from '../components/AiActionPanel.jsx'
+import DismissibleNotice from '../components/DismissibleNotice.jsx'
 import { applicationStatuses, statusMeta } from '../data/applicationStatus.js'
 import { careerApi } from '../lib/api.js'
 
@@ -153,7 +154,14 @@ function Applications() {
   return (
     <div className="space-y-6">
       {loading && <div className="card text-sm font-semibold text-slate-500 dark:text-slate-400">Loading applications...</div>}
-      {error && <div className="rounded-lg border border-rose-200 bg-rose-50 p-3 text-sm font-semibold text-rose-700 dark:border-rose-800 dark:bg-rose-950/40 dark:text-rose-200">{error}</div>}
+      {error && (
+        <DismissibleNotice
+          className="border-rose-200 bg-rose-50 text-sm font-semibold text-rose-700 dark:border-rose-800 dark:bg-rose-950/40 dark:text-rose-200"
+          onDismiss={() => setError('')}
+        >
+          {error}
+        </DismissibleNotice>
+      )}
       <div className="grid gap-4 xl:grid-cols-[1fr_auto]">
         <AiActionPanel
           title="Pipeline copilot"

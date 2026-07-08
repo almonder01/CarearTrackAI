@@ -123,6 +123,13 @@ export function clearAuth() {
   localStorage.removeItem('careertrack_user')
 }
 
+export function staticAssetUrl(path = '') {
+  if (!path) return '#'
+  if (/^https?:\/\//i.test(path)) return path
+  const origin = API_BASE_URL.replace(/\/api\/?$/i, '')
+  return `${origin}${path.startsWith('/') ? '' : '/'}${path}`
+}
+
 function estimateTokens(value) {
   const text = typeof value === 'string' ? value : JSON.stringify(value ?? '')
   return Math.max(1, Math.ceil(text.length / 4))
@@ -188,6 +195,12 @@ export const careerApi = {
   resumes: () => requestApi(() => api.get('/resumes'), 'Could not load resumes.'),
   uploadResume: (formData) => requestApi(() => api.post('/resumes', formData, { headers: { 'Content-Type': 'multipart/form-data' } }), 'Could not upload this resume.'),
   deleteResume: (id) => requestApi(() => api.delete(`/resumes/${id}`), 'Could not delete this resume.'),
+  deleteResumeVersion: (resumeId, versionId) => requestApi(() => api.delete(`/resumes/${resumeId}/versions/${versionId}`), 'Could not delete this resume version.'),
+  createResumeVersion: async (id, payload) => {
+    const result = await requestApi(() => api.post(`/resumes/${id}/versions/ai`, payload), 'Could not create an AI resume version right now.')
+    recordAiUsage('Resume version generation', { resumeId: id, ...payload }, result)
+    return result
+  },
 
   interviews: () => requestApi(() => api.get('/interviews'), 'Could not load interviews.'),
   createInterview: (applicationId, payload) => requestApi(() => api.post(`/applications/${applicationId}/interviews`, payload), 'Could not create this interview.'),

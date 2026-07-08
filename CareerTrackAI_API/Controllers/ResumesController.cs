@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using CareerTrackAI.DTOs.Resume;
 using CareerTrackAI.Services;
 using CareerTrackAI.Shared;
 using Microsoft.AspNetCore.Authorization;
@@ -13,12 +14,14 @@ namespace CareerTrackAI.Controllers
     {
         private readonly IResumeService _resumeService;
         private readonly IResumeTextExtractionService _textExtractionService;
+        private readonly IAiService _aiService;
         private readonly IWebHostEnvironment _env;
 
-        public ResumesController(IResumeService resumeService, IResumeTextExtractionService textExtractionService, IWebHostEnvironment env)
+        public ResumesController(IResumeService resumeService, IResumeTextExtractionService textExtractionService, IAiService aiService, IWebHostEnvironment env)
         {
             _resumeService = resumeService;
             _textExtractionService = textExtractionService;
+            _aiService = aiService;
             _env = env;
         }
 
@@ -87,6 +90,28 @@ namespace CareerTrackAI.Controllers
         {
             var result = await _resumeService.GetVersionsAsync(id, GetUserId());
             return Ok(ApiResponse<object>.Ok(result));
+        }
+
+        [HttpPost("{id}/versions/ai")]
+        public async Task<IActionResult> CreateAiVersion(int id, [FromBody] CreateAiResumeVersionRequest request)
+        {
+            if (!ModelState.IsValid)
+                return BadRequest(ApiResponse<object>.Fail("Invalid resume version request."));
+
+            var result = await _aiService.CreateResumeVersionAsync(id, GetUserId(), request ?? new CreateAiResumeVersionRequest());
+            if (result.Version == null)
+                return BadRequest(ApiResponse<object>.Fail(result.Message));
+
+            return Ok(ApiResponse<CreateAiResumeVersionResponse>.Ok(result, result.Message));
+        }
+
+        [HttpDelete("{id}/versions/{versionId}")]
+        public async Task<IActionResult> DeleteVersion(int id, int versionId)
+        {
+            var deleted = await _resumeService.DeleteVersionAsync(id, versionId, GetUserId());
+            return deleted
+                ? Ok(ApiResponse.OkNoData("Resume version deleted"))
+                : NotFound(ApiResponse<object>.NotFound("Resume version not found"));
         }
 
         private async Task<(string FileUrl, string FilePath)> SaveFileAsync(IFormFile file, int userId)

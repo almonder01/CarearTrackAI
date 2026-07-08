@@ -31,4 +31,26 @@ namespace CareerTrackAI.DTOs.Resume
         [MaxLength(150)]
         public string Label { get; set; } = string.Empty;
     }
+
+    public class CreateAiResumeVersionRequest
+    {
+        public int? JobOpportunityId { get; set; }
+        public int? TargetCompanyId { get; set; }
+
+        [MaxLength(180)]
+        public string? TargetRole { get; set; }
+
+        [MaxLength(200)]
+        public string? VersionName { get; set; }
+
+        [MaxLength(1000)]
+        public string? AdditionalInstructions { get; set; }
+    }
+
+    public class CreateAiResumeVersionResponse
+    {
+        public ResumeVersionResponse? Version { get; set; }
+        public string Message { get; set; } = string.Empty;
+        public string? Preview { get; set; }
+    }
 }

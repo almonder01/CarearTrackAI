@@ -12,7 +12,7 @@ This folder contains the React frontend for CareerTrackAI.
 - Recharts
 - dnd-kit
 - lucide-react
-- react-markdown
+- react-markdown with remark-gfm
 
 ## Development
 
@@ -41,7 +41,7 @@ The final frontend uses real backend responses only. No mock data fallback is in
 - `Data Hub` - CSV import, shared database, Adzuna, JobDataLake, and AI sourcing
 - `Opportunities` - review opportunities, verify links, track applications, export/delete rows
 - `Applications` - Kanban pipeline for Planning, Applied, Interview, Accepted, and Rejected
-- `Resumes` - upload CVs, analyze with AI, and delete unused files
+- `Resumes` - upload CVs, analyze with AI, create tailored DOCX versions, preview/download files, collapse resume cards, delete individual versions, and track Last used timestamps
 - `Interviews` - schedule interviews, save meeting links, and generate AI prep notes
 - `AI Studio` - persistent career chat, recommendations, Gemini token test, and cover letters
 - `Usage` - Gemini and external job API usage summaries

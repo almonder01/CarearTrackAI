@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Save } from 'lucide-react'
 import { careerApi } from '../lib/api.js'
 import { useAuth } from '../context/useAuth.js'
+import DismissibleNotice from '../components/DismissibleNotice.jsx'
 
 function Profile() {
   const { user, setUser } = useAuth()
@@ -50,7 +51,14 @@ function Profile() {
       <p className="mt-2 text-sm leading-6 text-slate-500 dark:text-slate-400">
         AI recommendations become sharper when your university, major, city, graduation year, and career focus are accurate.
       </p>
-      {error && <div className="mt-4 rounded-lg border border-rose-200 bg-rose-50 p-3 text-sm font-semibold text-rose-700 dark:border-rose-800 dark:bg-rose-950/40 dark:text-rose-200">{error}</div>}
+      {error && (
+        <DismissibleNotice
+          className="mt-4 border-rose-200 bg-rose-50 text-sm font-semibold text-rose-700 dark:border-rose-800 dark:bg-rose-950/40 dark:text-rose-200"
+          onDismiss={() => setError('')}
+        >
+          {error}
+        </DismissibleNotice>
+      )}
       <div className="mt-6 grid gap-4 sm:grid-cols-2">
         {[
           ['fullName', 'Full name', 'text'],
@@ -90,7 +98,14 @@ function Profile() {
           <Save size={17} />
           {saving ? 'Saving...' : 'Save profile'}
         </button>
-        {saved && <span className="text-sm font-semibold text-emerald-700 dark:text-emerald-300">Saved successfully</span>}
+        {saved && (
+          <DismissibleNotice
+            className="border-emerald-200 bg-emerald-50 text-sm font-semibold text-emerald-800 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-200"
+            onDismiss={() => setSaved(false)}
+          >
+            Saved successfully
+          </DismissibleNotice>
+        )}
       </div>
     </form>
   )

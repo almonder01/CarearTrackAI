@@ -14,6 +14,7 @@ namespace CareerTrackAI.Services
         Task<bool> DeleteAsync(int id, int userId);
         Task<ResumeVersionResponse?> CreateVersionAsync(int resumeId, int userId, string versionName, string fileUrl, string? fileType, int? targetCompanyId);
         Task<List<ResumeVersionResponse>> GetVersionsAsync(int resumeId, int userId);
+        Task<bool> DeleteVersionAsync(int resumeId, int versionId, int userId);
     }
 
     public class ResumeService : IResumeService
@@ -144,6 +145,35 @@ namespace CareerTrackAI.Services
                 .ToListAsync();
 
             return versions.Select(MapVersionToResponse).ToList();
+        }
+
+        public async Task<bool> DeleteVersionAsync(int resumeId, int versionId, int userId)
+        {
+            var version = await _db.ResumeVersions
+                .Include(v => v.Resume)
+                .FirstOrDefaultAsync(v => v.Id == versionId && v.ResumeId == resumeId && v.Resume.UserId == userId);
+            if (version == null) return false;
+
+            var now = DateTime.UtcNow;
+            var linkedApplications = await _db.Applications
+                .Where(application => application.UserId == userId && application.ResumeVersionId == version.Id)
+                .ToListAsync();
+
+            foreach (var application in linkedApplications)
+            {
+                application.ResumeVersionId = null;
+                application.UpdatedAt = now;
+            }
+
+            version.IsDeleted = true;
+            version.DeletedAt = now;
+            version.UpdatedAt = now;
+            version.Resume.UpdatedAt = now;
+            await _db.SaveChangesAsync();
+
+            DeleteLocalResumeFile(version.FileUrl, userId);
+            DeleteUserResumeFolderIfEmpty(userId);
+            return true;
         }
 
         private static ResumeResponse MapToResponse(Resume r) => new()

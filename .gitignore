@@ -21,3 +21,6 @@ tmp-build/
 .vscode/
 .DS_Store
 Thumbs.db
+
+# Reports
+Reports/

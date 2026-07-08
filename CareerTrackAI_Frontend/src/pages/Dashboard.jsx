@@ -5,6 +5,7 @@ import { ArrowRight, BadgeCheck, BriefcaseBusiness, CheckCircle2, Circle, Clock3
 import dayjs from 'dayjs'
 import MetricCard from '../components/MetricCard.jsx'
 import AiActionPanel from '../components/AiActionPanel.jsx'
+import DismissibleNotice from '../components/DismissibleNotice.jsx'
 import { careerApi } from '../lib/api.js'
 import { statusMeta } from '../data/applicationStatus.js'
 
@@ -116,7 +117,17 @@ function Dashboard() {
   }, [])
 
   if (loading && !stats) return <div className="card animate-pulse">Loading dashboard...</div>
-  if (error && !stats) return <div className="rounded-lg border border-rose-200 bg-rose-50 p-3 text-sm font-semibold text-rose-700 dark:border-rose-800 dark:bg-rose-950/40 dark:text-rose-200">{error}</div>
+  if (error && !stats) {
+    return (
+      <DismissibleNotice
+        className="border-rose-200 bg-rose-50 text-sm font-semibold text-rose-700 dark:border-rose-800 dark:bg-rose-950/40 dark:text-rose-200"
+        onDismiss={() => setError('')}
+      >
+        {error}
+      </DismissibleNotice>
+    )
+  }
+  if (!stats) return <div className="card text-sm font-semibold text-slate-500 dark:text-slate-400">Dashboard data is not available right now.</div>
 
   const showCharts = localStorage.getItem('careertrack_show_dashboard_charts') !== 'false'
   const showAiPanels = localStorage.getItem('careertrack_show_ai_panels') !== 'false'
@@ -126,9 +137,12 @@ function Dashboard() {
   return (
     <div className="space-y-6">
       {error && (
-        <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm font-semibold text-amber-900 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-200">
+        <DismissibleNotice
+          className="border-amber-200 bg-amber-50 text-sm font-semibold text-amber-900 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-200"
+          onDismiss={() => setError('')}
+        >
           {error}
-        </div>
+        </DismissibleNotice>
       )}
       <GettingStarted checklist={checklist} />
 

@@ -139,10 +139,11 @@ Rules:
 - Uploaded files are stored under `wwwroot/uploads/resumes/{userId}`.
 - Deleting a resume soft-deletes the database record and physically removes the local file.
 - Linked applications are detached from the deleted resume.
+- `LastUsedAt` is updated when the resume is analyzed, used to create an AI version, or selected in an application.
 
 ### ResumeVersions
 
-Stores future AI-generated or tailored resume versions.
+Stores AI-generated or tailored resume versions.
 
 Important fields:
 
@@ -156,7 +157,8 @@ Important fields:
 Rules:
 
 - Versions are soft-deleted when their parent resume is deleted.
-- Version files are removed from local storage when deleted through the parent resume.
+- Individual versions can also be deleted; linked applications keep the application row but lose the removed version reference.
+- Version files are removed from local storage when deleted directly or through the parent resume.
 
 ### Interviews
 

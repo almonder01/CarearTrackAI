@@ -77,6 +77,7 @@ namespace CareerTrackAI.Services
             };
 
             _db.Applications.Add(application);
+            await TouchResumeUsageAsync(userId, request.ResumeId, request.ResumeVersionId);
             await _db.SaveChangesAsync();
 
             // نعيد جلبه مع العلاقات كاملة
@@ -115,6 +116,7 @@ namespace CareerTrackAI.Services
             if (request.AppliedAt.HasValue) application.AppliedAt = request.AppliedAt;
             if (request.ResumeId.HasValue) application.ResumeId = request.ResumeId;
             if (request.ResumeVersionId.HasValue) application.ResumeVersionId = request.ResumeVersionId;
+            await TouchResumeUsageAsync(userId, request.ResumeId, request.ResumeVersionId);
 
             if (request.FollowUpSent.HasValue)
             {
@@ -142,6 +144,34 @@ namespace CareerTrackAI.Services
                     .Include(version => version.Resume)
                     .AnyAsync(version => version.Id == resumeVersionId.Value && version.Resume.UserId == userId);
                 if (!ownsVersion) throw new InvalidOperationException("Selected resume version is not available in this workspace.");
+            }
+        }
+
+        private async Task TouchResumeUsageAsync(int userId, int? resumeId, int? resumeVersionId)
+        {
+            var now = DateTime.UtcNow;
+            if (resumeId.HasValue)
+            {
+                var resume = await _db.Resumes.FirstOrDefaultAsync(item => item.Id == resumeId.Value && item.UserId == userId);
+                if (resume != null)
+                {
+                    resume.LastUsedAt = now;
+                    resume.UpdatedAt = now;
+                }
+            }
+
+            if (resumeVersionId.HasValue)
+            {
+                var versionResume = await _db.ResumeVersions
+                    .Include(version => version.Resume)
+                    .Where(version => version.Id == resumeVersionId.Value && version.Resume.UserId == userId)
+                    .Select(version => version.Resume)
+                    .FirstOrDefaultAsync();
+                if (versionResume != null)
+                {
+                    versionResume.LastUsedAt = now;
+                    versionResume.UpdatedAt = now;
+                }
             }
         }
 

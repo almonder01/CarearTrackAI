@@ -3,6 +3,7 @@ import { Link, useNavigate } from 'react-router-dom'
 import { ArrowRight, BriefcaseBusiness, Eye, EyeOff, GraduationCap, Sparkles } from 'lucide-react'
 import { useAuth } from '../context/useAuth.js'
 import BrandMark from '../components/BrandMark.jsx'
+import DismissibleNotice from '../components/DismissibleNotice.jsx'
 
 function Register() {
   const navigate = useNavigate()
@@ -95,7 +96,14 @@ function Register() {
             <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">Only name, email, and password are required to start.</p>
           </div>
 
-          {error && <div className="mb-4 rounded-lg bg-rose-50 p-3 text-sm text-rose-700 dark:bg-rose-950/40 dark:text-rose-200">{error}</div>}
+          {error && (
+            <DismissibleNotice
+              className="mb-4 border-rose-200 bg-rose-50 text-sm font-semibold text-rose-700 dark:border-rose-800 dark:bg-rose-950/40 dark:text-rose-200"
+              onDismiss={() => setError('')}
+            >
+              {error}
+            </DismissibleNotice>
+          )}
 
           <div className="grid gap-4 sm:grid-cols-2">
             {fields.map(([name, label, type, required]) => (

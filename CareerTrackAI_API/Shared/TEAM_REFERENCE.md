@@ -38,7 +38,7 @@ Frontend:
 - `JobOpportunity` belongs to a company and may be personal or shared.
 - `Application` tracks a user against one opportunity.
 - `Resume` stores the original uploaded CV and extracted text.
-- `ResumeVersion` stores future AI-tailored CV versions.
+- `ResumeVersion` stores AI-tailored DOCX CV versions created from an uploaded resume.
 - `Interview` belongs to an application.
 - `Notification` belongs to a user.
 
@@ -72,7 +72,7 @@ Frontend:
 ## Core Workflow
 
 1. User registers and completes the profile.
-2. User uploads a CV.
+2. User uploads a CV, analyzes it, and can create tailored AI resume versions.
 3. User imports or discovers companies and opportunities in Data Hub.
 4. User reviews opportunities and tracks selected roles.
 5. Applications move through the Kanban pipeline.
@@ -117,3 +117,4 @@ Failed responses:
 - If Gemini is not configured, user-facing messages must be clear and non-technical.
 - AI-generated recommendations and notes should be refreshed only when the user asks for them.
 - AI content displayed in rich text areas should use Markdown rendering.
+- AI-generated resume documents should clean Markdown markers before writing DOCX output.
